@@ -1,12 +1,12 @@
 /**
- * 🥔 PotatoAI: Intent-Response Router Chatbot
+ * 🥔 PotatoAI: Code-Aware Intent-Response Router Chatbot
  * -------------------------------------------------------------
- * This script implements a clean, robust Intent-Response Router:
- * 1. Conversational prompts shortcut directly to basic_conversation.txt.
- * 2. Stop words are stripped from technical queries before matching.
- * 3. Technical queries are matched to documentation files and return
- *    structured, flow-sorted 3-to-5 sentence paragraphs.
- * 4. Beautiful, minimalist terminal UI.
+ * This script implements a markdown-aware Intent-Response Router:
+ * 1. Reads structured dataset files split by '@@@'.
+ * 2. Scans queries for code request keywords ("code", "example", "write", etc.).
+ * 3. Prioritizes matching blocks containing markdown code wrappers (```).
+ * 4. Routes greetings and simple queries straight to basic_conversation.txt.
+ * 5. Prints raw markdown content directly preserving formatting.
  */
 
 import readline from 'node:readline';
@@ -50,35 +50,35 @@ const techTopics = {
   }
 };
 
-// Raw sentences map loaded on startup
-const topicSentences = {};
+// Raw content blocks map loaded on startup
+const topicBlocks = {};
 
 console.log('🤖 Loading datasets and configuring Intent-Response Router...');
 
 try {
-  // Load conversation dataset
+  // Load conversation dataset (split by newline)
   const convPath = path.join(datasetsDir, 'basic_conversation.txt');
   if (!fs.existsSync(convPath)) {
     throw new Error('Missing basic_conversation.txt dataset.');
   }
-  topicSentences['basic_conversation'] = fs.readFileSync(convPath, 'utf-8')
+  topicBlocks['basic_conversation'] = fs.readFileSync(convPath, 'utf-8')
     .split(/\r?\n/)
     .map(line => line.trim())
     .filter(line => line.length > 0);
 
-  // Load tech topic datasets
+  // Load tech topic datasets (split by '@@@' marker)
   for (const [topicName, info] of Object.entries(techTopics)) {
     const filePath = path.join(datasetsDir, info.fileName);
     if (!fs.existsSync(filePath)) {
-      throw new Error(`Missing dataset file: ${info.fileName}. Run 'node synthesize.js' to generate them.`);
+      throw new Error(`Missing dataset file: ${info.fileName}. Please verify datasets folder.`);
     }
 
-    topicSentences[topicName] = fs.readFileSync(filePath, 'utf-8')
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(line => line.length > 0);
+    topicBlocks[topicName] = fs.readFileSync(filePath, 'utf-8')
+      .split('@@@')
+      .map(block => block.trim())
+      .filter(block => block.length > 0);
 
-    console.log(` 📂 Loaded topic: [${topicName.toUpperCase()}] (${topicSentences[topicName].length} sentences)`);
+    console.log(` 📂 Loaded topic: [${topicName.toUpperCase()}] (${topicBlocks[topicName].length} docs sections)`);
   }
   console.log('✅ Router configuration complete! AI is online.\n');
 } catch (error) {
@@ -129,54 +129,48 @@ function isGreetingOrGeneral(userInput) {
 }
 
 /**
- * Extracts and compiles a structured paragraph of documentation based on query matches.
+ * Extracts and compiles a structured Markdown block based on query matches.
+ * Prioritizes blocks with code if "code", "example", etc. are present in the query.
  * @param {string} userInput 
  * @param {string} topic 
- * @returns {string} The formatted response paragraph
+ * @returns {string} The matching documentation Markdown block
  */
-function getDocumentationParagraph(userInput, topic) {
-  const sentences = topicSentences[topic];
-  if (!sentences || sentences.length === 0) return "";
+function getDocumentationBlock(userInput, topic) {
+  const blocks = topicBlocks[topic];
+  if (!blocks || blocks.length === 0) return "";
 
   const queryTokens = cleanQuery(userInput);
+  const inputWords = userInput.toLowerCase().split(/\s+/).map(w => w.replace(/[^a-z0-9]/g, ''));
+  
+  // Define keywords indicating a request for code/examples
+  const codeKeywords = new Set(["code", "example", "write", "generate", "complete", "snippet"]);
+  const requestsCode = inputWords.some(word => codeKeywords.has(word));
 
-  // Score each sentence based on matching keyword hits
-  const scored = sentences.map((sentence, index) => {
-    const sTokens = sentence.toLowerCase().split(/\s+/).map(w => w.replace(/[^a-z0-9]/g, ''));
+  // Score each block based on matching keyword hits
+  const scored = blocks.map((block, index) => {
+    const blockLower = block.toLowerCase();
     let score = 0;
+    
+    // Match query keywords
     for (const token of queryTokens) {
-      if (sTokens.includes(token)) {
+      if (blockLower.includes(token)) {
         score++;
       }
     }
-    return { index, sentence, score };
+
+    // Boost score if user requested code and the block contains a markdown code block
+    if (requestsCode && blockLower.includes("```")) {
+      score += 15; // Apply code boost priority
+    }
+
+    return { index, block, score };
   });
 
-  // Filter out non-matching sentences
-  let candidates = scored.filter(c => c.score > 0);
+  // Sort by match density descending
+  scored.sort((a, b) => b.score - a.score);
 
-  // Sort candidates by match density descending
-  candidates.sort((a, b) => b.score - a.score);
-
-  // Take the top matching sentences
-  let selected = candidates.slice(0, 4);
-
-  // If we don't have enough matching sentences (we want at least 3), pad with general sentences
-  if (selected.length < 3) {
-    const selectedIndices = new Set(selected.map(s => s.index));
-    for (let i = 0; i < sentences.length; i++) {
-      if (selected.length >= 4) break;
-      if (!selectedIndices.has(i)) {
-        selected.push({ index: i, sentence: sentences[i], score: 0 });
-        selectedIndices.add(i);
-      }
-    }
-  }
-
-  // Flow-Sorting: Re-sort selected sentences by their original line order in the file
-  selected.sort((a, b) => a.index - b.index);
-
-  return selected.map(item => item.sentence).join(' ');
+  // Return the highest scoring block directly (fallback to first block if no matches)
+  return scored[0].block;
 }
 
 // INTENT ROUTER PIPELINE
@@ -189,7 +183,7 @@ function processUserQuery(userInput) {
 
   // 1. CONVERSATIONAL DIRECT ROUTE
   if (isGreetingOrGeneral(inputCleaned)) {
-    const convSentences = topicSentences['basic_conversation'];
+    const convSentences = topicBlocks['basic_conversation'];
     if (convSentences && convSentences.length > 0) {
       return convSentences[Math.floor(Math.random() * convSentences.length)];
     }
@@ -217,7 +211,7 @@ function processUserQuery(userInput) {
 
   // 3. DOCUMENTATION EXTRACT ROUTE & FALLBACK
   if (maxHits > 0 && bestTopic) {
-    return getDocumentationParagraph(inputCleaned, bestTopic);
+    return getDocumentationBlock(inputCleaned, bestTopic);
   }
 
   // Clean fallback listing available topics
@@ -240,7 +234,7 @@ const rl = readline.createInterface({
 });
 
 console.log('================================================================');
-console.log('🥔 Welcome to PotatoAI Chatbot - Intent-Response Router');
+console.log('🥔 Welcome to PotatoAI Chatbot - Code-Aware Intent Router');
 console.log('================================================================');
 console.log('Ask me anything about React, .NET, Express, or Testing!');
 console.log('Type "exit" to quit.');
@@ -258,8 +252,8 @@ function startChatLoop() {
 
     const reply = processUserQuery(inputCleaned);
     
-    // Clean, premium UI borders
-    console.log('🤖 PotatoAI:');
+    // Clean, premium UI borders - preserves markdown formatting exactly
+    console.log('\n🤖 PotatoAI:');
     console.log('--------------------------------------------------------------------------------');
     console.log(reply);
     console.log('--------------------------------------------------------------------------------');
