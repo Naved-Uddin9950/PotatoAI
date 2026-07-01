@@ -25,7 +25,179 @@ app.post('/api/echo', (req, res) => {
 app.listen(3000, () => console.log('Server online on port 3000'));
 ```
 @@@
-# Express [EXPERT ARCHITECTURE]: Scalable Middleware Piping and Centralized Error Boundaries
+# Express [ROUTING & PARAMS]: Modular Routing and Parameter Extraction
+
+Express routers map incoming requests to handlers based on URIs and HTTP verbs. You can extract dynamic route variables or query string filters using Express routing utilities.
+
+**Key Core Concepts:**
+* **express.Router():** Creates modular, mountable route handlers to organize endpoints across separate files.
+* **Route Params:** Extraction of parameters prefixed with colons (e.g. `/:id`), accessible via `req.params`.
+* **Query Params:** Query parameters (e.g. `?search=term`), parsed automatically into `req.query`.
+
+```javascript
+import express from 'express';
+const router = express.Router();
+
+// Route with dynamic path variable and query string checks
+router.get('/users/:userId/orders', (req, res) => {
+  const userId = req.params.userId;
+  const limit = req.query.limit || 10;
+  res.json({
+    userId,
+    limit,
+    message: `Fetching last ${limit} orders for User #${userId}`
+  });
+});
+
+export default router;
+```
+@@@
+# Express [MIDDLEWARE FLOW]: Request Pipelines and Custom Middleware
+
+Express handles requests using chains of middleware functions. Each middleware can execute code, modify request/response properties, terminate the lifecycle, or invoke the next step.
+
+**Key Core Concepts:**
+* **Middleware Signature:** Functions containing three parameters: `(req, res, next)`.
+* **The next() callback:** Standard function pointer triggering execution of subsequent pipeline handlers.
+* **Application-level vs Router-level:** Applying middleware globally via `app.use` or targeting individual routes.
+
+```javascript
+import express from 'express';
+const app = express();
+
+// Custom request logger middleware
+function requestLogger(req, res, next) {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${req.method} request to ${req.path}`);
+  next(); // Pass control down pipeline
+}
+
+app.use(requestLogger); // Register middleware globally
+```
+@@@
+# Express [REST APIs & PAYLOADS]: JSON Handling and Status Codes
+
+Express backends commonly act as RESTful endpoints exchanging data using JSON. Proper status codes indicate operation outcomes to frontend consumers.
+
+**Key Core Concepts:**
+* **JSON Serialization:** Using `res.json()` automatically serializes objects into JSON strings and sets content-type headers.
+* **Status Codes:** Enforcing correct codes (200 for OK, 201 for Created, 400 for Bad Request, 404 for Not Found).
+* **Payload Validation:** Checking request bodies to prevent malformed writes to the database.
+
+```javascript
+import express from 'express';
+const app = express();
+app.use(express.json());
+
+app.post('/api/items', (req, res) => {
+  const { name, price } = req.body;
+  if (!name || !price) {
+    return res.status(400).json({ error: 'Name and Price parameters are required.' });
+  }
+  
+  const newItem = { id: Date.now(), name, price };
+  res.status(201).json(newItem); // Return 201 Created status
+});
+```
+@@@
+# Express [CORS]: Configuring Cross-Origin Resource Sharing
+
+CORS prevents web applications running on one domain from calling APIs hosted on other domains. Express manages this by setting CORS headers.
+
+**Key Core Concepts:**
+* **Access-Control-Allow-Origin:** Authorizes target frontend domains to request API resources.
+* **Pre-flight Requests:** Handling HTTP `OPTIONS` requests sent by browsers to verify API policies.
+* **Access-Control-Allow-Headers:** Restricting custom header properties (e.g. `Authorization`).
+
+```javascript
+import express from 'express';
+const app = express();
+
+// Custom CORS middleware setup
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200); // Send 200 to pre-flight check
+  }
+  next();
+});
+```
+@@@
+# Express [TOKEN AUTHENTICATION]: JWT Signatures and Route Guarding
+
+Securing API endpoints is commonly handled using JSON Web Tokens (JWT). Express routes can be protected using validation middleware that inspects Authorization headers.
+
+**Key Core Concepts:**
+* **Bearer Token:** Authorization header structure containing token credentials (`Bearer <token>`).
+* **JWT Verification:** Decoding signature algorithms using secret keys to verify payload claims.
+* **Route Guarding:** Injecting authentication middleware into routes that require user authorization.
+
+```javascript
+import express from 'express';
+import jwt from 'jsonwebtoken';
+
+const app = express();
+const JWT_SECRET = 'super-secret-key-change-in-prod';
+
+// Authentication Guard Middleware
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Extract token from Bearer
+
+  if (!token) return res.status(401).json({ error: 'Access token missing' });
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Invalid token' });
+    req.user = user; // Attach payload claims to request
+    next();
+  });
+}
+
+// Protected Route
+app.get('/api/profile', authenticateToken, (req, res) => {
+  res.json({ message: 'Welcome to your profile', user: req.user });
+});
+```
+@@@
+# Express [FILE UPLOADS]: Handling Multi-part Forms with Multer
+
+Express requires intermediate middleware to parse incoming binary data or file streams uploaded via multi-part form data layouts.
+
+**Key Core Concepts:**
+* **Multer Middleware:** Binary streaming middleware parsing multi-part file payloads.
+* **Local Storage Configuration:** Configuring folder destinations and filenames for uploaded files.
+* **Size Throttling:** Restricting maximum file sizes to protect memory allocations on servers.
+
+```javascript
+import express from 'express';
+import multer from 'multer';
+const app = express();
+
+// Configure local storage destination
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, './uploads/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
+  }
+});
+
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 } // Limit to 5MB
+});
+
+app.post('/api/upload', upload.single('document'), (req, res) => {
+  if (!req.file) return res.status(400).send('No file uploaded.');
+  res.json({ message: 'File uploaded successfully!', path: req.file.path });
+});
+```
+@@@
+# Express [EXPERT ARCHITECTURE]: Centralized Error Boundaries and Centralized Handler Middleware
 
 Enterprise Express applications utilize pipelines of modular middleware to validate requests, apply security policies, and route requests safely. A centralized async boundary ensures unhandled rejections are caught cleanly without crashing the server instance.
 

@@ -39,6 +39,181 @@ public class WelcomeController : ControllerBase
 }
 ```
 @@@
+# .NET [DEPENDENCY INJECTION]: Registering Lifecycles in C#
+
+Dependencies are configured in the application startup file (`Program.cs`) to wire up interfaces to their concrete implementations.
+
+**Key Core Concepts:**
+* **builder.Services:** The central container API where interface contracts are registered.
+* **AddTransient:** Used for lightweight, stateless services.
+* **AddScoped:** Preferred for database contexts and services that hold request-specific state.
+* **AddSingleton:** Used for caching services, configuration clients, or shared system pools.
+
+```javascript
+using Microsoft.Extensions.DependencyInjection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Registering dependencies with concrete lifecycles
+builder.Services.AddTransient<IEmailSender, EmailSender>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddSingleton<ICacheManager, CacheManager>();
+
+var app = builder.Build();
+```
+@@@
+# .NET [ENTITY FRAMEWORK CORE]: DbContext and Database Context Configuration
+
+Entity Framework Core (EF Core) functions as an Object-Relational Mapper (ORM), enabling C# developers to interact with relational databases using typed entities instead of writing SQL queries.
+
+**Key Core Concepts:**
+* **DbContext:** Manages connection pools, change tracking, and queries.
+* **DbSet<Entity>:** Represents an individual database table.
+* **OnConfiguring:** Customizes database engine drivers (e.g. SQL Server, PostgreSQL, SQLite).
+
+```javascript
+using Microsoft.EntityFrameworkCore;
+
+public class Employee
+{
+    public int Id { get; set; }
+    public string Name { get; set; }
+    public decimal Salary { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Employee> Employees { get; set; }
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        // Bind connection string to SQL Server engine
+        optionsBuilder.UseSqlServer("Server=localhost;Database=PotatoDB;Trusted_Connection=True;TrustServerCertificate=True;");
+    }
+}
+```
+@@@
+# .NET [LINQ QUERIES]: Querying Lists with Language Integrated Query
+
+Language Integrated Query (LINQ) provides a declarative syntax inside C# to filter, sort, map, and aggregate lists or database entities.
+
+**Key Core Concepts:**
+* **Deferred Execution:** LINQ queries are not evaluated until they are iterated (e.g., using `.ToList()`).
+* **Filtering and Projection:** `.Where()` filters data, while `.Select()` projects variables into new forms or DTOs.
+* **Eager Joins:** `.Include()` tells EF Core to load related relational data using SQL JOIN queries.
+
+```javascript
+using System.Linq;
+using System.Collections.Generic;
+
+public class QueryManager
+{
+    public List<string> GetHighEarningEmployees(AppDbContext context)
+    {
+        return context.Employees
+            .Where(e => e.Salary > 75000)                // Filter
+            .OrderByDescending(e => e.Salary)            // Sort
+            .Select(e => $"{e.Name} (${e.Salary})")       // Project DTO
+            .ToList();                                  // Execute query
+    }
+}
+```
+@@@
+# .NET [JWT AUTHENTICATION]: Securing APIs with Bearer Tokens
+
+Securing ASP.NET Core endpoints is commonly done using JWT authorization middleware, validating request headers automatically.
+
+**Key Core Concepts:**
+* **AddJwtBearer:** Configures authentication middleware parameters (issuer, audience, signing keys).
+* **Authorize Attribute:** Decorator (`[Authorize]`) protecting controllers or HTTP actions from anonymous requests.
+* **Claims:** Key-value attributes embedded inside the token payload (e.g. User ID, User Role).
+
+```javascript
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+[ApiController]
+[Route("api/[controller]")]
+public class ReportsController : ControllerBase
+{
+    [Authorize(Roles = "Manager")] // Protect endpoint to require Manager role
+    [HttpGet]
+    public IActionResult GetFinancials()
+    {
+        return Ok("Financial records generated.");
+    }
+}
+```
+@@@
+# .NET [BACKGROUND WORKERS]: Long-Running Background Services using HostedService
+
+C# supports hosted background services (`BackgroundService`) to run asynchronous, long-running processing queues (like reading messages, starting queues, or writing logs).
+
+**Key Core Concepts:**
+* **IHostedService:** Core lifecycle interface for background tasks managed by the ASP.NET Core host.
+* **BackgroundService Class:** Helper base class implementing `ExecuteAsync` which runs on its own background thread.
+* **Task Delay Loop:** Thread-safe processing loops executing until `CancellationToken` signals shutdown.
+
+```javascript
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+public class CacheCleanupWorker : BackgroundService
+{
+    private readonly ILogger<CacheCleanupWorker> _logger;
+
+    public CacheCleanupWorker(ILogger<CacheCleanupWorker> logger)
+    {
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("Cleaning up cache cache files at: {time}", DateTimeOffset.Now);
+            await Task.Delay(TimeSpan.FromHours(1), stoppingToken); // Wait safely
+        }
+    }
+}
+```
+@@@
+# .NET [CUSTOM MIDDLEWARE]: Structuring the HTTP Request Pipeline
+
+Custom middleware classes intercept incoming HTTP requests and outgoing HTTP responses in ASP.NET Core.
+
+**Key Core Concepts:**
+* **RequestDelegate:** The delegate representing the next component in the HTTP pipeline sequence.
+* **InvokeAsync:** The method containing the middleware execution logic.
+
+```javascript
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+
+public class PerformanceLogMiddleware
+{
+    private readonly RequestDelegate _next;
+    private readonly ILogger<PerformanceLogMiddleware> _logger;
+
+    public PerformanceLogMiddleware(RequestDelegate next, ILogger<PerformanceLogMiddleware> logger)
+    {
+        _next = next;
+        _logger = logger;
+    }
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        _logger.LogInformation($"Request started: {context.Request.Path}");
+        await _next(context); // Invoke next middleware handler
+        _logger.LogInformation($"Request ended: {context.Response.StatusCode}");
+    }
+}
+```
+@@@
 # .NET [EXPERT ARCHITECTURE]: Throttled Concurrent Processing with SemaphoreSlim and Task Parallelism
 
 Enterprise .NET architectures utilize the Task Parallel Library (TPL) to manage concurrent I/O workflows without blocking thread pools. When pulling batch resources, engineers use **SemaphoreSlim** to throttle execution, preventing resource starvation and database exhaustion.

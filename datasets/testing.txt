@@ -26,6 +26,198 @@ test('renders alert banner containing message', () => {
 });
 ```
 @@@
+# Testing [EVENT SIMULATION]: Triggering Interactions with UserEvent and FireEvent
+
+Test suites simulate real user behavior—like typing text, checking buttons, or selecting items—to verify state transitions in components.
+
+**Key Core Concepts:**
+* **fireEvent:** Direct, synchronous DOM event dispatching interface.
+* **userEvent:** Modern, asynchronous helper simulating full browser interactions (e.g. keypress triggers hover, focus, then input).
+* **Asynchronous Awaiting:** User interactions often trigger state renders, requiring awaited promises.
+
+```javascript
+import React, { useState } from 'react';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+function UserForm({ onSubmit }) {
+  const [value, setValue] = useState('');
+  return (
+    <div>
+      <input value={value} onChange={e => setValue(e.target.value)} placeholder="Enter username" />
+      <button onClick={() => onSubmit(value)}>Submit</button>
+    </div>
+  );
+}
+
+test('types input and submits correct username', async () => {
+  const mockSubmit = jest.fn();
+  render(<UserForm onSubmit={mockSubmit} />);
+
+  const input = screen.getByPlaceholderText('Enter username');
+  const button = screen.getByRole('button', { name: /submit/i });
+
+  await userEvent.type(input, 'potato_developer'); // Simulates typing
+  await userEvent.click(button); // Simulates click
+
+  expect(mockSubmit).toHaveBeenCalledWith('potato_developer');
+});
+```
+@@@
+# Testing [MOCKING FUNCTIONS]: Tracking Executions with jest.fn()
+
+Mocks replace live callback hooks or event handlers with dummy interfaces, letting developers verify call frequencies, execution parameters, and return targets.
+
+**Key Core Concepts:**
+* **jest.fn():** Creates a mock function wrapper tracking parameter histories.
+* **toHaveBeenCalledTimes:** Asserts exact trigger occurrences.
+* **mockReturnValue:** Stubs return outputs to control test paths.
+
+```javascript
+import React from 'react';
+import { render, screen, fireEvent } from '@testing-library/react';
+
+const ProductCard = ({ title, onSelect }) => (
+  <div>
+    <h4>{title}</h4>
+    <button onClick={() => onSelect(title)}>View details</button>
+  </div>
+);
+
+test('invokes onSelect handler with product name', () => {
+  const selectMock = jest.fn(); // Initialize mock spy
+  render(<ProductCard title="Potato Monitor" onSelect={selectMock} />);
+
+  fireEvent.click(screen.getByRole('button', { name: /view details/i }));
+
+  expect(selectMock).toHaveBeenCalledTimes(1);
+  expect(selectMock).toHaveBeenCalledWith('Potato Monitor');
+});
+```
+@@@
+# Testing [MOCKING MODULES]: Replacing Entire External Packages with jest.mock
+
+When writing unit tests, components may import third-party packages (like `axios` or `react-router-dom`). You can override entire packages using `jest.mock`.
+
+**Key Core Concepts:**
+* **jest.mock():** Intercepts import/require scopes, binding targets to mock objects.
+* **mockResolvedValue:** Stubs resolved promise returns (useful for mocking fetching utilities).
+* **Isolation Boundary:** Prevents real library execution (e.g. preventing HTTP calls).
+
+```javascript
+import axios from 'axios';
+import { render, screen, act } from '@testing-library/react';
+
+jest.mock('axios'); // Mock axios module globally inside this file
+
+function FetchUser() {
+  const [name, setName] = React.useState('');
+  React.useEffect(() => {
+    axios.get('/api/user').then(res => setName(res.data.name));
+  }, []);
+  return <div>User: {name}</div>;
+}
+
+test('mocks axios get response', async () => {
+  // Mock resolve result format
+  axios.get.mockResolvedValue({ data: { name: 'Alice' } });
+
+  await act(async () => {
+    render(<FetchUser />);
+  });
+
+  expect(await screen.findByText('User: Alice')).toBeInTheDocument();
+});
+```
+@@@
+# Testing [TESTING CUSTOM HOOKS]: Validating logic with renderHook
+
+Custom hooks can be tested in isolation using the **renderHook** utility, bypassing the need to wrap them in dummy components.
+
+**Key Core Concepts:**
+* **renderHook:** Mounts a hook into a virtual test component.
+* **result.current:** Accesses the hook's current returned values.
+* **actWrapper:** State updates inside the custom hook must be wrapped inside `act` to trigger re-renders safely.
+
+```javascript
+import { useState, useCallback } from 'react';
+import { renderHook, act } from '@testing-library/react';
+
+function useCounter() {
+  const [count, setCount] = useState(0);
+  const increment = useCallback(() => setCount(c => c + 1), []);
+  return { count, increment };
+}
+
+test('should increment custom counter', () => {
+  const { result } = renderHook(() => useCounter());
+
+  expect(result.current.count).toBe(0);
+
+  act(() => {
+    result.current.increment(); // Wrap hook actions in act()
+  });
+
+  expect(result.current.count).toBe(1);
+});
+```
+@@@
+# Testing [SNAPSHOT TESTING]: Visual Regression Checking with toMatchSnapshot
+
+Snapshot tests freeze component markup rendering trees, checking for unexpected interface layout changes.
+
+**Key Core Concepts:**
+* **toMatchSnapshot():** Creates a `.snap` serialization file on first run; subsequent runs compare rendering output against this snapshot.
+* **Updating Snapshots:** Updating snapshots via the `-u` flag if component layouts undergo deliberate modification.
+
+```javascript
+import React from 'react';
+import renderer from 'react-test-renderer';
+
+function StaticCard({ header, body }) {
+  return (
+    <div className="card">
+      <h3>{header}</h3>
+      <p>{body}</p>
+    </div>
+  );
+}
+
+test('renders card markup snapshot correctly', () => {
+  const tree = renderer
+    .create(<StaticCard header="Alert" body="Service error detected" />)
+    .toJSON();
+  expect(tree).toMatchSnapshot(); // Verifies structural markup matches snapshot file
+});
+```
+@@@
+# Testing [TESTING EXPRESS APIs]: Routing Integration Tests with Supertest
+
+Express backends can be tested without opening real TCP socket listening ports by piping Express middleware definitions directly into **Supertest**.
+
+**Key Core Concepts:**
+* **supertest:** Helper client simulating HTTP requests against Express app handlers.
+* **Status Validations:** Asserting correct response codes (200, 201, 400).
+* **JSON Verification:** Inspecting body contents using Jest expectations on returns.
+
+```javascript
+import request from 'supertest';
+import express from 'express';
+
+const app = express();
+app.get('/api/v1/ping', (req, res) => res.status(200).json({ reply: 'pong' }));
+
+// Express route integration test
+test('GET /api/v1/ping returns pong payload', async () => {
+  const response = await request(app)
+    .get('/api/v1/ping')
+    .expect('Content-Type', /json/)
+    .expect(200); // Verify HTTP status code
+
+  expect(response.body.reply).toBe('pong'); // Verify payload
+});
+```
+@@@
 # Testing [EXPERT ARCHITECTURE]: Mock Service Worker (MSW) Network Mocking
 
 In expert integration testing, mocking modules or libraries (like mocking `axios` globally) leads to brittle tests that hide implementation bugs. Best-practice setups utilize **Mock Service Worker (MSW)** to intercept network requests at the browser layer, keeping components isolated while maintaining realistic request pipelines.

@@ -1,42 +1,262 @@
-# ReactJS [BASIC WORKFLOW]: Components, Props, and useState
+# ReactJS [BASIC WORKFLOW]: Components, Props, and JSX
 
-React enables developers to build user interfaces by combining small, reusable **functional components**. Components accept custom inputs called **props** and manage local mutable data using the **useState** hook.
+React is a component-based frontend library. You build interfaces by composing small, isolated functional components that accept inputs called **props** and return JSX structures.
 
 **Key Core Concepts:**
-* **Functional Components:** JavaScript functions that return JSX (HTML-like syntax executed in JavaScript).
-* **Props:** Read-only attributes passed down from parent components to customize children.
-* **useState Hook:** Returns the current state value and a setter function to schedule a re-render.
-* **Unidirectional Flow:** Data always flows down, ensuring state changes are predictable and traceable.
+* **Functional Components:** JavaScript functions that return HTML-like JSX tags.
+* **Props:** Immutable, read-only data passed from parent components to child components.
+* **Unidirectional Flow:** Data flows strictly downwards, ensuring updates are predictable.
+* **JSX Compilation:** JSX looks like HTML but compiles into native `React.createElement` JavaScript calls.
 
 ```javascript
-import React, { useState } from 'react';
+import React from 'react';
 
-// Child component receiving props
-function GreetCard({ username, userRole }) {
+// Child component accepting props
+function UserCard({ name, role }) {
   return (
-    <div className="card">
-      <h2>Welcome, {username}!</h2>
-      <p>Role: <strong>{userRole}</strong></p>
+    <div className="user-card">
+      <h3>{name}</h3>
+      <p>Role: <strong>{role}</strong></p>
     </div>
   );
 }
 
-// Parent component managing state
+// Parent component rendering child components
 export default function App() {
-  const [role, setRole] = useState('Guest');
-
   return (
-    <div className="container">
-      <GreetCard username="Developer" userRole={role} />
-      <button onClick={() => setRole('Administrator')}>Elevate Role</button>
+    <div className="app-container">
+      <UserCard name="Alice" role="Frontend Architect" />
+      <UserCard name="Bob" role="Full Stack Engineer" />
     </div>
   );
 }
 ```
 @@@
+# ReactJS [STATE & EVENTS]: Event Handling and useState Hook
+
+State represents the local, mutable memory of a component. The **useState** hook declares a state variable and a setter function, allowing components to respond dynamically to user interactions.
+
+**Key Core Concepts:**
+* **Local State:** Component-specific memory that persists across re-render cycles.
+* **Event Handlers:** Binding functions to HTML actions (like `onClick` or `onChange`).
+* **Triggering Re-renders:** Calling the state setter function schedules a component update.
+* **Functional State Updates:** Passing a callback to setter `setVal(prev => prev + 1)` ensures updates based on state queues.
+
+```javascript
+import React, { useState } from 'react';
+
+export default function Counter() {
+  const [count, setCount] = useState(0);
+
+  const increment = () => setCount(prevCount => prevCount + 1);
+  const decrement = () => setCount(prevCount => prevCount - 1);
+
+  return (
+    <div className="counter">
+      <h2>Count: {count}</h2>
+      <button onClick={increment}>Increment</button>
+      <button onClick={decrement}>Decrement</button>
+    </div>
+  );
+}
+```
+@@@
+# ReactJS [LIFECYCLES & EFFECTS]: useEffect and API Data Fetching
+
+Side effects are operations that reach outside the React rendering flow (e.g., fetching API data, starting timers, registering event listeners). The **useEffect** hook manages these side effects.
+
+**Key Core Concepts:**
+* **Dependency Array:** Empty `[]` runs effect once on mount. Variable arrays `[props, state]` run effect when variables modify.
+* **Cleanup Function:** Return a callback function from `useEffect` to clear listeners, prevent leaks, and cancel timers.
+* **State Synchronization:** Keep local state synchronized with remote network parameters.
+
+```javascript
+import React, { useState, useEffect } from 'react';
+
+export default function DataList() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    
+    // API Data Fetching
+    fetch('https://jsonplaceholder.typicode.com/posts')
+      .then(res => res.json())
+      .then(data => {
+        if (active) {
+          setItems(data.slice(0, 5));
+          setLoading(false);
+        }
+      });
+
+    // Cleanup: prevents updates if component unmounts during fetch
+    return () => {
+      active = false;
+    };
+  }, []); // Run on mount only
+
+  if (loading) return <p>Loading articles...</p>;
+
+  return (
+    <ul>
+      {items.map(item => <li key={item.id}>{item.title}</li>)}
+    </ul>
+  );
+}
+```
+@@@
+# ReactJS [GLOBAL CONTEXT]: Sharing State using createContext and useContext
+
+The Context API enables components to share global state configurations (like themes, user sessions, or localization parameters) without passing props through intermediate visual components.
+
+**Key Core Concepts:**
+* **Provider Component:** Wraps elements, exposing a `value` prop to all children.
+* **useContext Hook:** Consumer hook that subscribes to Context updates.
+* **Prop Drilling Avoidance:** Eliminates routing props through multiple layout components.
+
+```javascript
+import React, { createContext, useContext, useState } from 'react';
+
+// Create the Context
+const ThemeContext = createContext();
+
+export function ThemeProvider({ children }) {
+  const [theme, setTheme] = useState('light');
+  const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
+
+  return (
+    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+// Consumer Component subscribing to ThemeContext
+export function ThemeToggleButton() {
+  const { theme, toggleTheme } = useContext(ThemeContext);
+  return (
+    <button onClick={toggleTheme} className={`btn-${theme}`}>
+      Switch to {theme === 'light' ? 'Dark' : 'Light'} Mode
+    </button>
+  );
+}
+```
+@@@
+# ReactJS [FORMS & REFS]: Controlled Inputs and the useRef Hook
+
+Forms can be handled dynamically using state (Controlled Inputs) or via direct DOM references using the **useRef** hook (Uncontrolled Inputs).
+
+**Key Core Concepts:**
+* **Controlled Inputs:** Input value is bound to state; updates are routed via state setters.
+* **useRef Hook:** Returns a mutable ref object whose `.current` property references the actual DOM element without triggering re-renders.
+* **DOM Access:** Focus inputs, measure sizes, or access properties directly.
+
+```javascript
+import React, { useState, useRef } from 'react';
+
+export default function InputForm() {
+  const [text, setText] = useState(''); // Controlled state
+  const inputRef = useRef(null); // DOM reference
+
+  const focusInput = () => {
+    inputRef.current.focus(); // Access DOM node directly
+  };
+
+  return (
+    <div>
+      <input 
+        ref={inputRef} 
+        value={text} 
+        onChange={(e) => setText(e.target.value)} 
+        placeholder="Type here..." 
+      />
+      <button onClick={focusInput}>Focus Input Element</button>
+    </div>
+  );
+}
+```
+@@@
+# ReactJS [PERFORMANCE]: Memoization with useMemo, useCallback, and React.memo
+
+To prevent performance drops, developers use memoization hooks to skip calculations or callback re-creations during component updates.
+
+**Key Core Concepts:**
+* **useMemo:** Caches the output value of a function, re-evaluating only when dependencies modify.
+* **useCallback:** Caches callback function references, preventing down-tree child updates.
+* **React.memo:** High-order component preventing re-renders if incoming props match exactly.
+
+```javascript
+import React, { useState, useMemo, useCallback } from 'react';
+
+// Child component memoized with React.memo
+const ListItems = React.memo(({ addHandler }) => {
+  console.log('Child rendered');
+  return <button onClick={addHandler}>Add Task</button>;
+});
+
+export default function App() {
+  const [tasks, setTasks] = useState([]);
+  const [count, setCount] = useState(0);
+
+  // Caches function reference across renders
+  const addTask = useCallback(() => {
+    setTasks(prev => [...prev, 'New Task']);
+  }, []);
+
+  // Caches heavy array calculation
+  const taskCount = useMemo(() => {
+    return tasks.length;
+  }, [tasks]);
+
+  return (
+    <div>
+      <p>Counter: {count}</p>
+      <button onClick={() => setCount(count + 1)}>Increment Counter</button>
+      <p>Tasks length: {taskCount}</p>
+      <ListItems addHandler={addTask} />
+    </div>
+  );
+}
+```
+@@@
+# ReactJS [CUSTOM HOOKS]: Abstracting Custom Stateful Logic
+
+Custom hooks are standard JavaScript functions starting with the prefix `use` that can encapsulate React hooks, abstracting complex layout or data patterns into reusable code.
+
+**Key Core Concepts:**
+* **Logic Reusability:** Share stateful logic across independent components.
+* **Isolated State:** Every invocation of a custom hook maintains its own private, isolated state.
+* **Hooks Composition:** Custom hooks compose basic React hooks (`useState`, `useEffect`, etc.).
+
+```javascript
+import { useState, useEffect } from 'react';
+
+// Custom hook to check if user is online
+export function useOnlineStatus() {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Cleanup listeners
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  return isOnline;
+}
+```
+@@@
 # ReactJS [EXPERT ARCHITECTURE]: Custom Rendering Micro-States and useSyncExternalStore
 
-In highly complex layouts, rendering bottlenecks occur when global states (e.g. Context API) force deep component trees to re-render. Modern React architecture utilizes **useSyncExternalStore** to subscribe to external stores, enabling targeted micro-state updates without re-rendering the whole page.
+In complex UIs, global state providers force entire page trees to re-render. Modern React architecture utilizes **useSyncExternalStore** to subscribe to external stores, enabling targeted micro-state updates without re-rendering the whole page.
 
 **Key Core Concepts:**
 * **Micro-States:** Decoupled states that update components in isolation.
