@@ -1,92 +1,225 @@
 /**
- * 🥔 PotatoAI: Advanced TF-IDF Vector Classifier Chatbot
- * -------------------------------------------------------------
- * This script solves classification and query indexing issues by:
- * 1. Filtering stop words for topic detection but falling back if input is stop-word only.
- * 2. Using two tokenization levels: stop-word filtered and stemmed only (for sentence lookup).
- * 3. Enforcing dynamic paragraphs flow-sorted by document line order.
- * 4. Cleaning terminal UI for presentation.
+ * 🥔 PotatoAI: Probabilistic Trigram Markov Generator with Semantic Topic Routing
+ * -------------------------------------------------------------------------------
+ * This script implements a hybrid conversational AI:
+ * 1. Conversational Queries are routed directly to natural sentences in basic_conversation.txt.
+ * 2. Technical Queries are routed to a Probabilistic Trigram/Bigram Markov Chain trained dynamically.
+ * 3. Markov generation seeds itself with user query words and generates clean paragraphs.
+ * 4. Punctuation tracking is used to end sentences naturally and prevent repetitive loops.
  */
 
 import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import natural from 'natural';
-
-const { TfIdf, WordTokenizer, PorterStemmer } = natural;
-const tokenizer = new WordTokenizer();
 
 // Setup __dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const datasetsDir = path.join(__dirname, 'datasets');
 
-// Common English stopwords to filter out before classification
-const stopwords = new Set([
-  "what", "is", "can", "you", "please", "tell", "me", "about", "a", "an", "the", 
-  "to", "in", "on", "at", "for", "with", "of", "and", "or", "but", "if", "then", 
-  "how", "why", "are", "do", "does", "did", "have", "has", "had", "would", "should", 
-  "could", "your", "my", "our", "their", "his", "her", "its", "i", "we", "they", "he", 
-  "she", "it", "this", "that", "these", "those", "explain"
-]);
-
-// Explicit technical keyword boosts to avoid the Basic Conversation Trap
-const topicBoosts = {
-  reactjs: ["react", "reactjs", "jsx", "hook", "component", "components", "redux", "usestate", "useeffect", "state", "virtual"],
-  dotnet: ["dotnet", ".net", "c#", "csharp", "entity", "ef", "mssql", "microsoft", "api", "apis", "backend"],
-  express: ["express", "expressjs", "routing", "middleware", "cors", "body-parser", "port", "endpoint", "endpoints", "server", "node"],
-  testing: ["test", "testing", "jest", "mock", "rtl", "assertion", "coverage", "unit", "integration", "mocks"]
-};
-
-// Pre-stem the topic boost keywords for fast matching
-const stemmedTopicBoosts = {};
-for (const [topic, keywords] of Object.entries(topicBoosts)) {
-  stemmedTopicBoosts[topic] = keywords.map(kw => PorterStemmer.stem(kw.toLowerCase()));
-}
-
-// Holds the raw sentences for each topic file to allow sentence-level extraction
-const topicSentences = {};
-const primaryTfidf = new TfIdf();
-
-/**
- * Tokenizes and stems only (retains stopwords for natural sentence matching).
- * @param {string} text 
- * @returns {string[]} Stemmed tokens
- */
-function stemOnly(text) {
-  const tokens = tokenizer.tokenize(text.toLowerCase());
-  return tokens.map(token => PorterStemmer.stem(token));
-}
-
-/**
- * Tokenizes, filters out stop words, and stems a given string of text.
- * @param {string} text 
- * @returns {string[]} Filtered and stemmed tokens
- */
-function cleanAndStem(text) {
-  const tokens = tokenizer.tokenize(text.toLowerCase());
-  return tokens
-    .filter(token => !stopwords.has(token))
-    .map(token => PorterStemmer.stem(token));
-}
-
-// DYNAMIC FILE READER & PRIMARY TF-IDF TRAINING
-console.log('🤖 Initializing TF-IDF Vector Space...');
-
-try {
-  const files = fs.readdirSync(datasetsDir).filter(file => file.endsWith('.txt'));
-
-  if (files.length === 0) {
-    throw new Error('No dataset files (.txt) found in datasets/ folder. Please run synthesize.js first.');
+// TOPIC-SPECIFIC TRIGRAM/BIGRAM MARKOV CHAIN
+class TopicMarkovChain {
+  constructor() {
+    this.bigrams = {};      // w1 -> [w2, w3...]
+    this.trigrams = {};     // "w1|w2" -> [w3, w4...]
+    this.startPairs = [];   // [[w1, w2], [w3, w4]...]
   }
 
-  for (const file of files) {
-    const topicName = path.basename(file, '.txt');
-    const filePath = path.join(datasetsDir, file);
-    const content = fs.readFileSync(filePath, 'utf-8');
+  /**
+   * Train the Markov model on an array of sentences.
+   * @param {string[]} sentences 
+   */
+  train(sentences) {
+    for (const sentence of sentences) {
+      const words = sentence.trim().split(/\s+/).filter(w => w.length > 0);
+      if (words.length < 2) {
+        if (words.length === 1) {
+          const w = words[0];
+          if (!this.bigrams[w]) this.bigrams[w] = [];
+        }
+        continue;
+      }
 
-    // Parse the file into raw sentences
+      // Record sentence starting word pair
+      this.startPairs.push([words[0], words[1]]);
+
+      for (let i = 0; i < words.length - 1; i++) {
+        const w1 = words[i];
+        const w2 = words[i + 1];
+
+        // 1. Build Bigram Map
+        if (!this.bigrams[w1]) {
+          this.bigrams[w1] = [];
+        }
+        this.bigrams[w1].push(w2);
+
+        // 2. Build Trigram Map (requires 3 consecutive words)
+        if (i < words.length - 2) {
+          const w3 = words[i + 2];
+          const key = `${w1}|${w2}`;
+          if (!this.trigrams[key]) {
+            this.trigrams[key] = [];
+          }
+          this.trigrams[key].push(w3);
+        }
+      }
+    }
+  }
+
+  /**
+   * Dynamically generate a brand new sentence seeded by user query.
+   * @param {string|null} seedWord 
+   * @param {number} maxWords 
+   * @returns {string} The generated sentence
+   */
+  generateSentence(seedWord = null, maxWords = 22) {
+    let w1 = null;
+    let w2 = null;
+
+    if (seedWord) {
+      const normalizedSeed = seedWord.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      // Check if seed word starts any sentence in training data
+      const matchingPairs = this.startPairs.filter(pair => 
+        pair[0].toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedSeed
+      );
+
+      if (matchingPairs.length > 0) {
+        const selectedPair = matchingPairs[Math.floor(Math.random() * matchingPairs.length)];
+        w1 = selectedPair[0];
+        w2 = selectedPair[1];
+      } else {
+        // Fallback to checking bigram dictionary keys
+        const keys = Object.keys(this.bigrams);
+        const match = keys.find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedSeed);
+        if (match) {
+          w1 = match;
+          const pool = this.bigrams[match];
+          w2 = pool[Math.floor(Math.random() * pool.length)];
+        }
+      }
+    }
+
+    // Fallback if no matching seeds found or provided
+    if (!w1 || !w2) {
+      if (this.startPairs.length > 0) {
+        const selectedPair = this.startPairs[Math.floor(Math.random() * this.startPairs.length)];
+        w1 = selectedPair[0];
+        w2 = selectedPair[1];
+      } else {
+        return "";
+      }
+    }
+
+    const sentence = [w1, w2];
+
+    // If starting pair has sentence-terminating punctuation, end early
+    if (/[.!?]$/.test(w2)) {
+      return sentence.join(' ');
+    }
+
+    for (let i = 0; i < maxWords - 2; i++) {
+      const trigramKey = `${w1}|${w2}`;
+      let nextWord = null;
+
+      // 1. Query Trigram dictionary (high context)
+      if (this.trigrams[trigramKey] && this.trigrams[trigramKey].length > 0) {
+        const pool = this.trigrams[trigramKey];
+        nextWord = pool[Math.floor(Math.random() * pool.length)];
+      } 
+      // 2. Query Bigram dictionary fallback (medium context)
+      else if (this.bigrams[w2] && this.bigrams[w2].length > 0) {
+        const pool = this.bigrams[w2];
+        nextWord = pool[Math.floor(Math.random() * pool.length)];
+      }
+
+      if (!nextWord) break; // Dead end
+
+      sentence.push(nextWord);
+
+      // Track punctuation to finish naturally
+      if (/[.!?]$/.test(nextWord)) {
+        break;
+      }
+
+      w1 = w2;
+      w2 = nextWord;
+    }
+
+    let result = sentence.join(' ');
+    if (!/[.!?]$/.test(result)) {
+      result += '.';
+    }
+    return result;
+  }
+
+  /**
+   * Generates a brand-new fluid paragraph consisting of multiple sentences.
+   * @param {string|null} seedWord 
+   * @param {number} minSentences 
+   * @param {number} maxSentences 
+   * @returns {string} Integrated paragraph response
+   */
+  generateParagraph(seedWord, minSentences = 3, maxSentences = 5) {
+    const totalSentences = Math.floor(Math.random() * (maxSentences - minSentences + 1)) + minSentences;
+    const list = [];
+
+    // First sentence seeded by user inquiry term
+    list.push(this.generateSentence(seedWord));
+
+    // Follow-up sentences generated from random starting pairs to mimic continuous discussion
+    for (let i = 1; i < totalSentences; i++) {
+      list.push(this.generateSentence(null));
+    }
+
+    return list.join(' ');
+  }
+}
+
+// 1. TOPIC DEFINITIONS AND KEYWORDS
+const topics = {
+  greeting: {
+    fileName: 'basic_conversation.txt',
+    keywords: ["hi", "hello", "hey", "greetings", "yo", "howdy", "sup", "welcome", "name", "who", "yourself", "bot", "chatbot", "ai", "are", "you", "how", "doing", "is"],
+    brain: null // No Markov Chain generation needed (routed directly to conversational lines)
+  },
+  react: {
+    fileName: 'reactjs.txt',
+    keywords: ["react", "reactjs", "component", "components", "hook", "hooks", "usestate", "useeffect", "dom", "redux", "router", "tailwind", "frontend"],
+    brain: new TopicMarkovChain()
+  },
+  dotnet: {
+    fileName: 'dotnet.txt',
+    keywords: ["dotnet", ".net", "c#", "csharp", "microsoft", "api", "apis", "backend", "entity", "ef", "framework", "enterprise"],
+    brain: new TopicMarkovChain()
+  },
+  express: {
+    fileName: 'express.txt',
+    keywords: ["express", "expressjs", "routing", "middleware", "node", "nodejs", "server", "cors", "port", "request", "response"],
+    brain: new TopicMarkovChain()
+  },
+  testing: {
+    fileName: 'testing.txt',
+    keywords: ["test", "testing", "jest", "mock", "mocking", "rtl", "assertions", "coverage", "unit", "integration"],
+    brain: new TopicMarkovChain()
+  }
+};
+
+// Holds the loaded raw sentences for reference and direct conversation routing
+const topicSentences = {};
+
+// DYNAMIC FILE READER & MARKOV TRAINING
+console.log('🤖 Loading datasets and compiling probabilistic Markov brains...');
+
+try {
+  for (const [topicName, topicInfo] of Object.entries(topics)) {
+    const filePath = path.join(datasetsDir, topicInfo.fileName);
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Missing dataset file: ${topicInfo.fileName}. Run 'node synthesize.js' to generate them.`);
+    }
+
+    const content = fs.readFileSync(filePath, 'utf-8');
     const sentences = content
       .split(/\r?\n/)
       .map(line => line.trim())
@@ -94,152 +227,90 @@ try {
 
     topicSentences[topicName] = sentences;
 
-    // Index only stemmed non-stopwords for topic classification
-    const stemmedDocumentTokens = cleanAndStem(content);
-    primaryTfidf.addDocument(stemmedDocumentTokens, topicName);
-
-    console.log(` 📂 Loaded & Indexed: ${file} (${sentences.length} sentences)`);
+    if (topicInfo.brain) {
+      topicInfo.brain.train(sentences);
+      console.log(` 📂 Trained Markov brain: [${topicName.toUpperCase()}] (${sentences.length} sentences)`);
+    } else {
+      console.log(` 📂 Loaded Conversational dataset: [${topicName.toUpperCase()}] (${sentences.length} sentences)`);
+    }
   }
-
-  console.log('✅ TF-IDF indexing complete!\n');
+  console.log('✅ Training complete! AI is ready.\n');
 } catch (error) {
-  console.error('❌ Initialization error:', error.message);
+  console.error('❌ Training error:', error.message);
   process.exit(1);
 }
 
-/**
- * Extracts the most relevant sentences in a topic and sorts them based on 
- * their original order in the file (flow-sorting) to build a natural paragraph.
- * @param {string} userInput Raw user input query.
- * @param {string} topic Name of the matching topic.
- * @param {number} maxSentences Limit of sentences to extract.
- * @returns {string} The final aggregated paragraph.
- */
-function extractRelevantParagraph(userInput, topic, maxSentences) {
-  const sentences = topicSentences[topic];
-  if (!sentences || sentences.length === 0) return "";
-
-  // For sentence matching inside the document, we use stemOnly (keep stopwords)
-  // so that conversational phrases match correctly, and TF-IDF's IDF naturally dampens
-  // common technical words.
-  const queryTokens = stemOnly(userInput);
-
-  const sentenceTfidf = new TfIdf();
-  sentences.forEach((sentence, index) => {
-    const stemmedSentence = stemOnly(sentence);
-    sentenceTfidf.addDocument(stemmedSentence, String(index));
-  });
-
-  const scoredSentences = [];
-  sentenceTfidf.tfidfs(queryTokens, (index, score) => {
-    scoredSentences.push({
-      index: Number(index),
-      sentence: sentences[Number(index)],
-      score: score
-    });
-  });
-
-  // Filter out sentences that have zero keyword overlaps
-  let candidates = scoredSentences.filter(item => item.score > 0);
-
-  // Sort by similarity score descending to find the top matching sentences
-  candidates.sort((a, b) => b.score - a.score);
-
-  // Grab the top matching sentences
-  const selected = candidates.slice(0, maxSentences);
-
-  // Flow-Sorting: Re-sort selected sentences by their original line order in the file
-  selected.sort((a, b) => a.index - b.index);
-
-  if (selected.length === 0) {
-    return sentences.slice(0, maxSentences).join(' ');
-  }
-
-  return selected.map(item => item.sentence).join(' ');
-}
-
-// INTENT CLASSIFICATION & RESPONSE PIPELINE
+// 3. SEMANTIC TOPIC ROUTING & GENERATION PIPELINE
 function processUserQuery(userInput) {
-  let queryTokens = cleanAndStem(userInput);
+  const inputWords = userInput
+    .toLowerCase()
+    .replace(/[?.,!]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(w => w.length > 0);
 
-  // Fallback: If everything gets filtered as a stopword (e.g. "how are you ?"), 
-  // fall back to raw stemming without stopword filtering so it can match conversation.
-  if (queryTokens.length === 0) {
-    queryTokens = stemOnly(userInput);
-  }
-
-  if (queryTokens.length === 0) {
+  if (inputWords.length === 0) {
     return "I didn't catch that. Could you type a question?";
   }
 
   let bestTopic = null;
-  let highestScore = 0;
-  const scores = [];
+  let maxHits = 0;
 
-  // Query the primary TF-IDF vector space
-  primaryTfidf.tfidfs(queryTokens, (index, measure, key) => {
-    let finalScore = measure;
-
-    // Apply strict keyword boosting
-    if (stemmedTopicBoosts[key]) {
-      for (const qToken of queryTokens) {
-        if (stemmedTopicBoosts[key].includes(qToken)) {
-          finalScore += 25.0; // Apply a massive boost for explicit technical keywords
-        }
+  // Intent classification based on weighted keyword matching
+  for (const [topicName, topicInfo] of Object.entries(topics)) {
+    let hits = 0;
+    for (const word of inputWords) {
+      if (topicInfo.keywords.includes(word)) {
+        hits++;
       }
     }
 
-    scores.push({ topic: key, score: finalScore });
-    
-    if (finalScore > highestScore) {
-      highestScore = finalScore;
-      bestTopic = key;
+    // Give tech topics a higher weight priority to avoid greeting bias on tech questions
+    if (topicName !== 'greeting' && hits > 0) {
+      hits += 5;
     }
-  });
 
-  // FALLBACK ROUTER (Threshold check)
-  const CONFIDENCE_THRESHOLD = 0.2;
+    if (hits > maxHits) {
+      maxHits = hits;
+      bestTopic = topicName;
+    }
+  }
 
-  if (highestScore < CONFIDENCE_THRESHOLD || !bestTopic) {
-    const availableTopics = Object.keys(topicSentences)
-      .map(topic => `   • ${topic}`)
+  // Fallback router
+  if (maxHits === 0 || !bestTopic) {
+    const availableTopics = Object.keys(topics)
+      .map(t => `   • ${t}`)
       .join('\n');
 
-    return `I'm sorry, I couldn't find a strong match for your query.
-    
-I am trained on the following topics:
-${availableTopics}
-
-Please try asking a question containing keywords related to these subjects!`;
+    return `I am not sure about that. I can discuss the following topics:\n${availableTopics}\n\nTry asking: "What is React?" or "How to test with RTL?"`;
   }
 
-  // Determine Response Length
-  // - Small Input (<= 2 words or basic conversation): Return 1 sentence
-  // - Medium/Large Input: Extract between 3 to 5 sentences and chain them into a paragraph
-  const isSmallInput = tokenizer.tokenize(userInput).length <= 2 || bestTopic === 'basic_conversation';
-  let maxSentences = 1;
+  // 3. CONVERSATIONAL ROUTER
+  if (bestTopic === 'greeting') {
+    const sentences = topicSentences['greeting'];
+    if (sentences && sentences.length > 0) {
+      // Pick a natural human response directly from basic_conversation.txt
+      return sentences[Math.floor(Math.random() * sentences.length)];
+    }
+    return "Hello! How can I help you today?";
+  }
 
-  if (!isSmallInput) {
-    // Calculate how many sentences match query tokens in the matching file
-    const allMatches = topicSentences[bestTopic].filter(sentence => {
-      const sentenceTokens = stemOnly(sentence);
-      return queryTokens.some(token => sentenceTokens.includes(token));
-    });
+  // 2. TECH MARKOV GENERATOR
+  // Attempt to find a seed word from user input to launch the sentence generation
+  let seedWord = null;
+  const targetBrain = topics[bestTopic].brain;
 
-    // Enforce 3 to 5 sentences for detailed technical answers
-    if (allMatches.length >= 5) {
-      maxSentences = 5;
-    } else if (allMatches.length >= 3) {
-      maxSentences = 3;
-    } else {
-      maxSentences = Math.max(2, allMatches.length);
+  for (const word of inputWords) {
+    const keys = Object.keys(targetBrain.bigrams);
+    const match = keys.find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === word);
+    if (match) {
+      seedWord = match;
+      break;
     }
   }
 
-  // Extract relevant paragraph with original file flow ordering
-  const responseParagraph = extractRelevantParagraph(userInput, bestTopic, maxSentences);
-
-  return responseParagraph;
+  // Generate a structured, probabilistic paragraph (3-5 sentences)
+  return targetBrain.generateParagraph(seedWord, 3, 5);
 }
 
 // CONTINUOUS INTERACTIVE CLI
@@ -249,7 +320,7 @@ const rl = readline.createInterface({
 });
 
 console.log('================================================================');
-console.log('🥔 Welcome to PotatoAI Chatbot - Strict TF-IDF Keyword Weighting');
+console.log('🥔 Welcome to PotatoAI Chatbot - Trigram Probabilistic Model');
 console.log('================================================================');
 console.log('Ask me anything about React, .NET, Express, or Testing!');
 console.log('Type "exit" to quit.');
@@ -267,7 +338,7 @@ function startChatLoop() {
 
     const reply = processUserQuery(inputCleaned);
     
-    // Clean Output UI formatting
+    // Beautiful clean UI
     console.log('🤖 PotatoAI:');
     console.log('--------------------------------------------------------------------------------');
     console.log(reply);
