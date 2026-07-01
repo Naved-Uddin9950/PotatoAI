@@ -1,27 +1,42 @@
 /**
- * 🥔 PotatoAI: Autonomous CLI Coding Agent (Multi-Mode Architecture)
- * ------------------------------------------------------------------
- * This script implements a Principal Coding Agent with distinct operating modes:
- * 1. Explainer Mode (/explain <topic>): conceptual block matching + line-by-line code summary.
- * 2. Debug Mode (/debug <topic>): extracts buggy code, explains the flaw, and outputs the fix.
- * 3. Plan Mode (/plan <task>): generates a step-by-step checklist based on the best architecture.
- * 4. Standard Search (default): returns matched markdown documentation cards.
+ * 🥔 PotatoAI: Autonomous Coding Agent (SearXNG API & Terminal Executor Tools)
+ * -----------------------------------------------------------------------------
+ * A fully native autonomous agent executing on low-spec hardware:
+ * 1. Explicit Router: routes strictly using prefixes (/search, /run, /write, etc.)
+ * 2. SearXNG API Tool: queries public SearXNG instances with DuckDuckGo fallback.
+ * 3. Terminal Executor Tool (/run <command>): executes shell commands locally.
+ * 4. File Writer Tool: writes code blocks directly to ./workspace/ via native fs.
+ * 5. Local Documentation Tool: queries local structured markdown cards.
+ * 
+ * EXACTLY ZERO EXTERNAL NPM LIBRARIES ARE USED.
  */
 
 import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { exec } from 'node:child_process';
 
-// Setup __dirname for ES Modules
+// Setup directories for ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const datasetsDir = path.join(__dirname, 'datasets');
+const workspaceDir = path.join(__dirname, 'workspace');
+
+// Initialize workspace folder if missing
+if (!fs.existsSync(workspaceDir)) {
+  fs.mkdirSync(workspaceDir, { recursive: true });
+}
 
 // Stopwords to filter out before topic classification
 const stopwords = new Set([
   "what", "is", "can", "you", "please", "tell", "me", "about", "how", "are", 
   "do", "does", "did", "explain", "the", "a", "an", "to", "for", "with", "of"
+]);
+
+// Greeting triggers
+const greetingKeywords = new Set([
+  "hi", "hello", "hey", "greetings", "yo", "howdy", "sup", "welcome"
 ]);
 
 // Technical topics and their lookup keywords
@@ -45,9 +60,8 @@ const techTopics = {
 };
 
 const topicBlocks = {};
-const topicSentences = {};
 
-console.log('🤖 Loading datasets and configuring AI Coding Agent...');
+console.log('🤖 Loading datasets and configuring native AI Agent...');
 
 try {
   // Load conversation dataset (split by newline)
@@ -74,7 +88,7 @@ try {
 
     console.log(` 📂 Loaded topic: [${topicName.toUpperCase()}] (${topicBlocks[topicName].length} docs sections)`);
   }
-  console.log('✅ AI Coding Agent is online.\n');
+  console.log('✅ Native AI Agent is online.\n');
 } catch (error) {
   console.error('❌ Training error:', error.message);
   process.exit(1);
@@ -120,7 +134,7 @@ function classifyTopic(text) {
 }
 
 /**
- * Extracts and compiles a structured Markdown block based on query matches.
+ * Extracts a matching Markdown block based on query matches.
  * @param {string} userInput 
  * @param {string} topic 
  * @returns {string} The matching documentation Markdown block
@@ -146,198 +160,231 @@ function getDocumentationBlock(userInput, topic) {
   return scored[0].block;
 }
 
-// -------------------------------------------------------------
-// MODE IMPLEMENTATION UTILITIES
-// -------------------------------------------------------------
-
 /**
- * Generates a line-by-line mechanical execution summary for code blocks.
- * @param {string} codeText 
- * @returns {string} The structured summary
+ * Executes a terminal shell command asynchronously and returns output.
+ * @param {string} cmd 
+ * @returns {Promise<string>} Console outputs (stdout / stderr)
  */
-function generateMechanicalSummary(codeText) {
-  const lines = codeText.split('\n');
-  const summary = [];
-  
-  lines.forEach((line, idx) => {
-    const trimmed = line.trim();
-    if (trimmed.length === 0 || trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*') || trimmed.startsWith('using')) {
-      return;
-    }
-
-    let explanation = "";
-    if (trimmed.includes('useState')) {
-      explanation = "Declares a local state hook (initializes variables and hooks state reactivity).";
-    } else if (trimmed.includes('useEffect')) {
-      explanation = "Declares a side-effect hook synchronization block (runs cleanup on unmount).";
-    } else if (trimmed.includes('useSyncExternalStore')) {
-      explanation = "Subscribes component rendering dynamically to an isolated external micro-state store.";
-    } else if (trimmed.includes('useRef')) {
-      explanation = "Creates a persistent element pointer mutable reference (bypasses re-renders).";
-    } else if (trimmed.includes('express()')) {
-      explanation = "Bootstraps a core server application instance utilizing the Express modules.";
-    } else if (trimmed.includes('.use(')) {
-      explanation = "Registers custom handler middleware components globally or into the router pipeline.";
-    } else if (trimmed.includes('.get(')) {
-      explanation = "Declares an HTTP GET endpoint route handler targeting client requests.";
-    } else if (trimmed.includes('.post(')) {
-      explanation = "Declares an HTTP POST endpoint route handler parsing request payload bodies.";
-    } else if (trimmed.includes('DbContext')) {
-      explanation = "Initializes an Object-Relational Database context mapper connection.";
-    } else if (trimmed.includes('Task.WhenAll')) {
-      explanation = "Executes async tasks in parallel, waiting for thread aggregation pools.";
-    } else if (trimmed.includes('SemaphoreSlim')) {
-      explanation = "Constructs a thread limits barrier gate throttling max parallel client threads.";
-    } else if (trimmed.includes('jest.fn()')) {
-      explanation = "Creates a Jest function execution spy monitoring parameter inputs.";
-    } else if (trimmed.includes('expect(')) {
-      explanation = "Verifies execution expectations matching outputs against target values.";
-    }
-
-    if (explanation) {
-      summary.push(`   Line ${idx + 1}: \`${trimmed}\`\n          └─> ${explanation}`);
-    }
+function executeTerminalCommand(cmd) {
+  return new Promise((resolve) => {
+    exec(cmd, { cwd: process.cwd() }, (error, stdout, stderr) => {
+      let output = "";
+      if (stdout) {
+        output += `⚡ **STDOUT:**\n\`\`\`\n${stdout.trim()}\n\`\`\`\n`;
+      }
+      if (stderr) {
+        output += `⚠️ **STDERR:**\n\`\`\`\n${stderr.trim()}\n\`\`\`\n`;
+      }
+      if (error) {
+        output += `❌ **EXECUTION ERROR (Exit Code ${error.code}):**\n\`\`\`\n${error.message.trim()}\n\`\`\`\n`;
+      }
+      if (!output) {
+        output = "⚡ Command finished successfully with no output streams.";
+      }
+      resolve(output);
+    });
   });
-
-  if (summary.length === 0) {
-    return "   No complex hooks, delegates, or API definitions found to summarize.";
-  }
-
-  return summary.join('\n');
 }
 
 /**
- * Extracts buggy code, explains the flaw, and outputs the fix.
- * @param {string} topic 
- * @returns {string} The debug response
+ * Queries SearXNG instances with primary and backup routing.
+ * Falls back to an unblockable DuckDuckGo HTML parser if both fail.
+ * @param {string} query 
+ * @returns {Promise<string|null>} Clean formatted information snippet or null
  */
-function handleDebugMode(topic) {
-  const blocks = topicBlocks[topic];
-  if (!blocks) {
-    return `Please specify a valid topic folder to debug. E.g., /debug reactjs or /debug express.`;
+async function querySearxng(query) {
+  const primaryUrl = `https://onon71.dev/search?q=${encodeURIComponent(query)}&format=json`;
+  const backupUrl = `https://searx.be/search?q=${encodeURIComponent(query)}&format=json`;
+  const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' };
+
+  // 1. Try primary SearXNG instance
+  try {
+    console.log(`🔍 Contacting primary SearXNG instance (onon71.dev)...`);
+    const response = await fetch(primaryUrl, { headers, signal: AbortSignal.timeout(5000) });
+    if (response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await response.json();
+        if (data.results && data.results.length > 0) {
+          return formatSearxngResults(data.results, query);
+        }
+      }
+    }
+  } catch (err) {
+    console.log(`⚠️ Primary instance failed: ${err.message}. Trying backup instance...`);
   }
 
-  // Retrieve the optimization block
-  const debugBlock = blocks.find(b => b.includes('🛑 BUGGY/UNOPTIMIZED CODE'));
-  if (!debugBlock) {
-    return `Could not locate a debug/optimization block for the topic: ${topic.toUpperCase()}`;
+  // 2. Try backup SearXNG instance
+  try {
+    console.log(`🔍 Contacting backup SearXNG instance (searx.be)...`);
+    const response = await fetch(backupUrl, { headers, signal: AbortSignal.timeout(5000) });
+    if (response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await response.json();
+        if (data.results && data.results.length > 0) {
+          return formatSearxngResults(data.results, query);
+        }
+      }
+    }
+  } catch (err) {
+    console.log(`⚠️ Backup instance failed: ${err.message}.`);
   }
 
-  let flawExplanation = "";
-  if (topic === 'reactjs') {
-    flawExplanation = "FLAW: The setInterval function is invoked on every render because the useEffect dependency array is missing. Additionally, the interval is never cleared when the component unmounts, causing memory leaks and CPU exhaustion as duplicate timers run concurrently.";
-  } else if (topic === 'express') {
-    flawExplanation = "FLAW: The endpoint uses fs.readFileSync() synchronously inside the single-threaded request handler. This blocks the entire Node.js event loop, preventing the server from handling any other concurrent client requests until the file read is complete.";
-  } else if (topic === 'dotnet') {
-    flawExplanation = "FLAW: The database context executes an N+1 query loop. It fetches a list of Users and then makes a separate database SQL request for each user inside the loop to fetch their Orders. This creates extreme database connection latency.";
-  } else if (topic === 'testing') {
-    flawExplanation = "FLAW: The test triggers an asynchronous state change using fireEvent.click() but asserts on the DOM layout synchronously using expect(). This causes the test to fail or raise 'not wrapped in act(...)' warnings because state updates after the assertion runs.";
+  // 3. Unblockable Fallback: DuckDuckGo HTML Scraper
+  try {
+    console.log(`🔍 Contacting unblockable search engine fallback (DuckDuckGo)...`);
+    const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const response = await fetch(ddgUrl, { headers, signal: AbortSignal.timeout(5000) });
+    if (response.ok) {
+      const html = await response.text();
+      const blockRegex = /<div class="[^"]*web-result[\s\S]*?<a class="result__url"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+      const results = [];
+      let match;
+      
+      while ((match = blockRegex.exec(html)) && results.length < 3) {
+        let rawUrl = match[1];
+        if (rawUrl.startsWith('//')) {
+          rawUrl = 'https:' + rawUrl;
+        }
+        let cleanUrl = rawUrl;
+        try {
+          const parsed = new URL(rawUrl);
+          const uddg = parsed.searchParams.get('uddg');
+          if (uddg) cleanUrl = decodeURIComponent(uddg);
+        } catch (e) {}
+
+        results.push({
+          title: match[2].replace(/<[^>]*>/g, '').trim(),
+          url: cleanUrl,
+          content: match[3].replace(/<[^>]*>/g, '').trim()
+        });
+      }
+
+      if (results.length > 0) {
+        return formatSearxngResults(results, query);
+      }
+    }
+  } catch (err) {
+    console.log(`⚠️ Unblockable search fallback failed: ${err.message}.`);
   }
 
-  return `🐞 DEBUG ANALYSIS: [${topic.toUpperCase()}]\n` +
-         `--------------------------------------------------------------------------------\n` +
-         `🔍 DETECTED LOGIC FLAW:\n` +
-         `   ${flawExplanation}\n\n` +
-         `${debugBlock}`;
+  return null; // All search tools failed
 }
 
 /**
- * Generates an ordered architecture checklist for a given task.
- * @param {string} task 
- * @param {string} topic 
- * @returns {string} The build plan
+ * Formats SearXNG query results array into a structured markdown block.
+ * @param {object[]} results 
+ * @param {string} query 
+ * @returns {string} Formatted markdown text
  */
-function handlePlanMode(task, topic) {
-  let steps = [];
-  if (topic === 'reactjs') {
-    steps = [
-      "Define Component Structure: Plan child layouts and state lifting options.",
-      "Initialize State Hooks: Declare input parameters and state structures via `useState`.",
-      "Synchronize Effects: Set up `useEffect` for network loading, specifying cleanup callbacks.",
-      "Memoization Check: Implement `useCallback` or `useMemo` to prevent deep-tree re-renders."
-    ];
-  } else if (topic === 'express') {
-    steps = [
-      "Structure Route Maps: Initialize routers via `express.Router()` inside endpoints.",
-      "Payload Middleware: Enable incoming body parsing via global `express.json()` calls.",
-      "Securing the Route: Add authentication guards (JWT verify hooks) and validate inputs.",
-      "Central Error Catching: Wrap operations in try-catch pipes delegating errors to `next()`."
-    ];
-  } else if (topic === 'dotnet') {
-    steps = [
-      "Establish Schema Context: Set up Database context properties mapping entity classes.",
-      "Lifecycle Service Registry: Register service lifetimes (Transient/Scoped) in `Program.cs`.",
-      "Form LINQ Queries: Implement query filters applying `.AsNoTracking()` and eager joins.",
-      "Throttling parallel calls: Incorporate `SemaphoreSlim` locks for multiple task tasks."
-    ];
-  } else if (topic === 'testing') {
-    steps = [
-      "Declare Test Runner Block: Wire assertions inside `describe` and `test` blocks.",
-      "Mock network adapters: Spin up MSW (Mock Service Worker) node listeners.",
-      "Trigger User Interaction: Dispatch virtual input triggers using async `userEvent`.",
-      "Catch Layout Changes: Await visual DOM updates via `findByRole` to prevent act warnings."
-    ];
-  } else {
-    steps = [
-      "Deconstruct Specifications: Outline components and module mappings.",
-      "Design Service Interfaces: Declare structural controllers and data models.",
-      "Implement Target Flow: Build primary logic, checking parameters validation.",
-      "Verify Performance Constraints: Check async loops to prevent processor blockage."
-    ];
-  }
-
-  return `📋 ARCHITECTURE CHECKLIST: "${task.toUpperCase()}"\n` +
-         `Component Domain: [${topic.toUpperCase()}]\n` +
-         `--------------------------------------------------------------------------------\n` +
-         steps.map((step, idx) => `   Step ${idx + 1}: ${step}`).join('\n') +
-         `\n--------------------------------------------------------------------------------`;
+function formatSearxngResults(results, query) {
+  const snippets = results.slice(0, 3)
+    .map(r => `• **${r.title}**\n  ${r.content || r.snippet || 'No description available.'}\n  [Link](${r.url})`)
+    .join('\n\n');
+  return `🔍 Web Search Results for "${query}":\n\n${snippets}`;
 }
 
 // -------------------------------------------------------------
-// CENTRAL COMMAND ROUTER
+// CENTRAL EXPLICIT PREFIX ROUTER
 // -------------------------------------------------------------
-function processAgentQuery(userInput) {
+async function processAgentQuery(userInput) {
   const cleanInput = userInput.trim();
 
-  // 1. EXPLAINER MODE (/explain <topic>)
-  if (cleanInput.startsWith('/explain')) {
-    const query = cleanInput.replace('/explain', '').trim();
-    if (!query) return "Usage: /explain <keyword> (e.g. /explain useState)";
+  // 1. EXPLICIT WEB SEARCH ROUTER (/search <query>)
+  if (cleanInput.startsWith('/search ')) {
+    const query = cleanInput.replace('/search ', '').trim();
+    console.log(`🔍 Exclusively routing to Web Search Tool for "${query}"...`);
+    const searchRes = await querySearxng(query);
+    return searchRes || `❌ Search Tool returned zero results for: "${query}"`;
+  }
 
-    const topic = classifyTopic(query);
-    if (!topic) return "I couldn't match that to a loaded topic. Try explaining: useState, middleware, SemaphoreSlim, Jest, etc.";
+  // 2. EXPLICIT TERMINAL COMMAND ROUTER (/run <command>)
+  if (cleanInput.startsWith('/run ')) {
+    const command = cleanInput.replace('/run ', '').trim();
+    console.log(`⚡ Exclusively routing to Terminal Executor: Running "${command}"...`);
+    return await executeTerminalCommand(command);
+  }
 
-    const block = getDocumentationBlock(query, topic);
+  // 3. EXPLICIT FILE SYSTEM WRITER ROUTER (starts with /write, /create, /save, /generate, generate file)
+  const isFileCommand = cleanInput.startsWith('/write') || 
+                        cleanInput.startsWith('/create') || 
+                        cleanInput.startsWith('/save') || 
+                        cleanInput.startsWith('/generate') ||
+                        cleanInput.toLowerCase().startsWith('generate file');
+
+  if (isFileCommand) {
+    console.log('💾 Routing to File Writer Tool...');
     
-    // Extract code block inside the block using regex
-    const codeMatch = block.match(/```javascript([\s\S]*?)```/);
-    const summaryHeader = `\n⚙️ LINE-BY-LINE MECHANICAL SUMMARY:\n`;
-    const summary = codeMatch ? generateMechanicalSummary(codeMatch[1]) : "No code block found to summarize.";
+    // Strip prefixes
+    let fileQuery = cleanInput;
+    if (cleanInput.startsWith('/write ')) fileQuery = cleanInput.replace('/write ', '');
+    else if (cleanInput.startsWith('/create ')) fileQuery = cleanInput.replace('/create ', '');
+    else if (cleanInput.startsWith('/save ')) fileQuery = cleanInput.replace('/save ', '');
+    else if (cleanInput.startsWith('/generate ')) fileQuery = cleanInput.replace('/generate ', '');
+    else if (cleanInput.toLowerCase().startsWith('generate file ')) fileQuery = cleanInput.slice(14);
 
-    return `${block}\n${summaryHeader}${summary}`;
-  }
+    const writeRegex = /(?:code|snippet|text|the|this)?\s*(.*?)\s+(?:to|in)\s+([a-zA-Z0-9_\-\.]+)/i;
+    const writeMatch = fileQuery.match(writeRegex);
 
-  // 2. DEBUG MODE (/debug <topic>)
-  if (cleanInput.startsWith('/debug')) {
-    const query = cleanInput.replace('/debug', '').trim();
-    if (!query) {
-      return "Usage: /debug <topic> (e.g. /debug reactjs, /debug express, /debug dotnet, /debug testing)";
+    if (!writeMatch) {
+      return `Format incorrect. Please write in the format: "/write <description> to <filename>". E.g., "/write react counter to counter.js"`;
     }
-    const topic = query.toLowerCase();
-    return handleDebugMode(topic);
+
+    const contentDescription = writeMatch[1].trim();
+    const filename = writeMatch[2].trim();
+    
+    // Determine if description requires a web search
+    const cleanDesc = contentDescription.replace(/^search\s+for\s+/i, '');
+    const isSearchNeeded = contentDescription.toLowerCase().startsWith('search for') || 
+                           contentDescription.toLowerCase().includes('latest') ||
+                           contentDescription.toLowerCase().includes('release');
+
+    let contentToWrite = "";
+    let sourceMessage = "";
+
+    if (isSearchNeeded) {
+      console.log(`🔍 Calling SearXNG API for "${cleanDesc}" to gather file content...`);
+      const searchRes = await querySearxng(cleanDesc);
+      if (searchRes) {
+        contentToWrite = searchRes;
+        sourceMessage = `SearXNG API query for "${cleanDesc}"`;
+      }
+    }
+
+    // Fallback to local documentation if content is still empty
+    if (!contentToWrite) {
+      const topic = classifyTopic(contentDescription);
+      if (topic) {
+        const block = getDocumentationBlock(contentDescription, topic);
+        // Extract code block inside the block if present
+        const codeMatch = block.match(/```(?:javascript|c#)?([\s\S]*?)```/);
+        contentToWrite = codeMatch ? codeMatch[1].trim() : block;
+        sourceMessage = `Local Documentation [${topic.toUpperCase()}] for "${contentDescription}"`;
+      } else {
+        contentToWrite = `// Template created for query: ${contentDescription}\n// No matched documentation found.`;
+        sourceMessage = `No matched topic. Empty template created.`;
+      }
+    }
+
+    console.log(`💾 Writing content to "./workspace/${filename}"...`);
+    try {
+      const filePath = path.join(workspaceDir, filename);
+      fs.writeFileSync(filePath, contentToWrite, 'utf-8');
+      
+      return `🎉 File successfully written!\n` +
+             `Path: [workspace/${filename}](file:///${filePath.replace(/\\/g, '/')})\n` +
+             `Source: ${sourceMessage}\n\n` +
+             `Preview of Content:\n` +
+             `--------------------------------------------------------------------------------\n` +
+             `${contentToWrite.slice(0, 300)}${contentToWrite.length > 300 ? '\n... (truncated)' : ''}\n` +
+             `--------------------------------------------------------------------------------`;
+    } catch (err) {
+      return `❌ File Writer Tool Error: Failed to write to disk. ${err.message}`;
+    }
   }
 
-  // 3. PLAN MODE (/plan <task>)
-  if (cleanInput.startsWith('/plan')) {
-    const task = cleanInput.replace('/plan', '').trim();
-    if (!task) return "Usage: /plan <task description> (e.g. /plan Build a react authentication component)";
-
-    const topic = classifyTopic(task) || 'general';
-    return handlePlanMode(task, topic);
-  }
-
-  // 4. STANDARD INTENT ROUTING
-  // Check if input is a conversational greeting/question
+  // 4. CONVERSATIONAL DIRECT ROUTE
   const words = cleanInput.toLowerCase().replace(/[?.,!]/g, ' ').trim().split(/\s+/);
   const isGreeting = words.some(w => greetingKeywords.has(w)) || 
                      cleanInput.toLowerCase().includes("how are you") || 
@@ -348,27 +395,28 @@ function processAgentQuery(userInput) {
     return convSentences[Math.floor(Math.random() * convSentences.length)];
   }
 
+  // 5. LOCAL DOCUMENTATION KEYWORD MATCHING (Default fallback)
   const topic = classifyTopic(cleanInput);
   if (topic) {
+    console.log(`📖 Invoking Local Documentation Tool for [${topic.toUpperCase()}]...`);
     return getDocumentationBlock(cleanInput, topic);
   }
 
-  // Fallback
+  // Fallback if no matching topic is found anywhere
   const availableTopics = Object.keys(techTopics).map(t => `   • ${t}`).join('\n');
-  return `I'm sorry, I couldn't match your query.
+  return `I'm sorry, I couldn't find a strong match for your query.
     
 I am trained on:
 ${availableTopics}
 
-Try using a command like:
-   • /explain useState
-   • /debug reactjs
-   • /plan build an express authentication router
-   • Or ask a standard question!`;
+You can also use tools explicitly:
+   • Search web: "/search which country produces most of the Anime ?"
+   • Write files: "/write the react counter component to counter.js"
+   • Run commands: "/run node --version"`;
 }
 
 // -------------------------------------------------------------
-// INTERACTIVE CLI LAYOUT
+// INTERACTIVE CLI LOOP
 // -------------------------------------------------------------
 const rl = readline.createInterface({
   input: process.stdin,
@@ -377,18 +425,18 @@ const rl = readline.createInterface({
 
 console.clear();
 console.log('================================================================');
-console.log('🥔 PotatoAI Coding Agent - Multi-Mode Architecture');
+console.log('🥔 Welcome to PotatoAI Coding Agent - Strict Prefix Routing');
 console.log('================================================================');
-console.log('🤖 Commands Available:');
-console.log('   /explain <keyword>  -> Explains a concept + code summary');
-console.log('   /debug <topic>      -> Analyzes a buggy model vs optimized fix');
-console.log('   /plan <task>        -> Generates a step-by-step build plan');
-console.log('   <general question>  -> Semantic documentation search');
-console.log('   type "exit"         -> Shut down the agent');
+console.log('🤖 Active Tools:');
+console.log('   /search <query>  -> FORCEFUL Web Search (SearXNG + DDG Fallback)');
+console.log('   /run <command>   -> Terminal command executor (e.g. "/run npm test")');
+console.log('   /write <args>    -> File system workspace writer');
+console.log('   <general text>   -> Default Local Docs Search');
+console.log('   type "exit" to quit');
 console.log('================================================================');
 
-function startChatLoop() {
-  rl.question('\n👤 You: ', (userInput) => {
+async function startChatLoop() {
+  rl.question('\n👤 You: ', async (userInput) => {
     const inputCleaned = userInput.trim();
 
     if (inputCleaned.toLowerCase() === 'exit') {
@@ -397,14 +445,14 @@ function startChatLoop() {
       return;
     }
 
-    const reply = processAgentQuery(inputCleaned);
+    const reply = await processAgentQuery(inputCleaned);
     
     console.log('\n🤖 PotatoAI:');
     console.log('--------------------------------------------------------------------------------');
     console.log(reply);
     console.log('--------------------------------------------------------------------------------');
 
-    startChatLoop();
+    startChatLoop(); // Loop back
   });
 }
 
