@@ -1,126 +1,115 @@
-# What is Express and Node.js
+# Express [BASIC WORKFLOW]: Server Setup, Basic Routing, and Request Parsing
 
-Express is a minimal and flexible web application framework for Node.js. It runs on top of the native Node.js HTTP module, simplifying routing, request processing, and endpoint mapping.
+Express provides a lightweight, unopinionated framework built on top of Node's native HTTP modules. It simplifies route mapping and body parsing using **built-in middleware**.
 
-**Core Concepts:**
-* **Event-Driven Runtime:** Node.js executes JavaScript on the server using Google's V8 engine, utilizing a single-threaded event loop.
-* **Non-Blocking I/O:** Heavy operations (files, network requests) run asynchronously, preventing the server thread from hanging.
-* **Unopinionated Framework:** Express provides core utility features without enforcing database models, folder structure, or third-party packages.
+**Key Core Concepts:**
+* **Express Instance:** Initializing the app server by calling `express()`.
+* **Routing Methods:** Mapping path routes using standard HTTP verbs like `app.get` and `app.post`.
+* **Body Parser:** Native `express.json()` middleware parses incoming JSON data payloads into `req.body`.
+* **Server Listen:** Launching the listener thread on a designated port.
 
 ```javascript
-// Simple Express Web Server Setup
 import express from 'express';
 const app = express();
-const PORT = 3000;
 
-app.get('/', (req, res) => {
-  res.send('Welcome to Node.js & Express!');
+app.use(express.json()); // Enable JSON payload parsing
+
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'healthy' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+app.post('/api/echo', (req, res) => {
+  res.json({ echoed: req.body });
 });
+
+app.listen(3000, () => console.log('Server online on port 3000'));
 ```
 @@@
-# Middleware Architecture and Execution Chain
+# Express [EXPERT ARCHITECTURE]: Scalable Middleware Piping and Centralized Error Boundaries
 
-Middleware functions are the fundamental building blocks of an Express application. They process requests sequentially before they reach the final route handler.
+Enterprise Express applications utilize pipelines of modular middleware to validate requests, apply security policies, and route requests safely. A centralized async boundary ensures unhandled rejections are caught cleanly without crashing the server instance.
 
-**Core Concepts:**
-* **Middleware Signature:** Functions accepting three parameters: `req` (request object), `res` (response object), and `next` (next middleware callback).
-* **Next Callback:** Invoking `next()` tells Express to pass control to the subsequent middleware function in the execution queue.
-* **Request Modification:** Middleware can run logic, read headers, modify request variables, or terminate the pipeline early by sending responses.
+**Key Core Concepts:**
+* **Middleware Chain:** Sequential request processing flow passing parameters via `next()`.
+* **Async Boundary Handler:** Wrapping async middleware routes to catch internal promise rejections automatically.
+* **Custom Error Classes:** Extending JavaScript's native Error object to hold explicit HTTP status codes.
+* **Centralized Error Middleware:** Catch-all endpoint intercepting errors and outputting structured JSON.
 
 ```javascript
 import express from 'express';
 const app = express();
 
-// Custom Logger Middleware
-function requestLogger(req, res, next) {
-  const method = req.method;
-  const path = req.path;
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${method} request to ${path}`);
-  next(); // Pass control to next handler
+// Custom API Exception Class
+class HttpException extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
 }
 
-app.use(requestLogger); // Apply globally to all routes
-```
-@@@
-# Routing and Dynamic URL Parameters
+// Async middleware wrapper boundary
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
 
-Routing maps URL paths and HTTP verbs (GET, POST, PUT, DELETE) to specific handlers. Dynamic URL parameters allow you to extract variables directly from matching paths.
+// Protected endpoint utilizing Async Boundary
+app.get('/api/secure', asyncHandler(async (req, res) => {
+  const token = req.headers.authorization;
+  if (!token) {
+    throw new HttpException(401, 'Unauthorized request. Token missing.');
+  }
+  res.json({ data: 'Sensitive records fetched.' });
+}));
 
-**Core Concepts:**
-* **HTTP Verbs:** Routes are defined mapping to standard HTTP verbs (`app.get`, `app.post`, `app.put`, `app.delete`).
-* **Route Params:** Parameters marked with a colon (e.g. `/users/:id`) are parsed dynamically and accessed via `req.params`.
-* **Query Params:** URL query parameters (e.g. `?sort=desc`) are accessed via the `req.query` object.
-
-```javascript
-import express from 'express';
-const app = express();
-
-// Route with dynamic ID parameter and query filter
-app.get('/api/users/:id', (req, res) => {
-  const userId = req.params.id;
-  const sortBy = req.query.sort || 'asc';
-  res.json({
-    userId,
-    sortBy,
-    message: `Details fetched for User #${userId}`
+// Centralized error handler middleware
+app.use((err, req, res, next) => {
+  const status = err.status || 500;
+  res.status(status).json({
+    error: {
+      message: err.message,
+      status: status
+    }
   });
 });
 ```
 @@@
-# Building REST APIs and JSON payload parsing
+# Express [OPTIMIZATION & ANTI-PATTERNS]: Preventing Event Loop Starvation and Unhandled Rejections
 
-Express is commonly used to build RESTful APIs that exchange data using JSON payloads. Express requires built-in parser middleware to parse incoming request payloads.
+Express servers running on low-resource machines easily crash or freeze when asynchronous operations block Node's single-threaded event loop or when unhandled promise rejections are thrown.
 
-**Core Concepts:**
-* **Body Parser:** Native `express.json()` middleware parses incoming JSON requests and populates the `req.body` object.
-* **Response Status Codes:** Returning correct HTTP status codes (200 for OK, 201 for Created, 400 for Bad Request).
-* **JSON Serialization:** Using `res.json()` automatically serializes objects into JSON strings and sets correct content-type headers.
+**Key Core Concepts:**
+* **Non-Blocking I/O:** Never run synchronous file system or blocking functions inside route controllers.
+* **Centralized Async Catching:** Async endpoints must wrap promises in try-catch blocks or pass rejections to `next()`.
+* **Event Loop Latency:** Avoid intensive CPU calculations (e.g. nested loops on big arrays) inside the thread pool.
 
 ```javascript
+// ==========================================
+// 🛑 BUGGY/UNOPTIMIZED CODE
+// ==========================================
 import express from 'express';
+import fs from 'fs'; // Synchronous imports
 const app = express();
 
-app.use(express.json()); // Enable JSON body parsing
-
-app.post('/api/products', (req, res) => {
-  const { name, price } = req.body;
-  if (!name || !price) {
-    return res.status(400).json({ error: 'Name and Price are required.' });
-  }
-  res.status(201).json({
-    message: 'Product created successfully',
-    product: { id: Date.now(), name, price }
-  });
+// BUG 1: Synchronous file read blocks the single thread, freezing the server for all other users
+// BUG 2: Missing try-catch on async calls. If database throws, the Node.js process crashes (uncaughtException)
+app.get('/data-leak', (req, res) => {
+  const data = fs.readFileSync('./bigfile.json', 'utf8'); // Blocks Event Loop
+  res.send(data);
 });
-```
-@@@
-# Handling CORS (Cross-Origin Resource Sharing)
 
-CORS is a security mechanism enforced by web browsers to restrict web apps from requesting resources from different origins. Express configures CORS using HTTP headers.
+// ==========================================
+// 🚀 HIGH-PERFORMANCE SOLUTION
+// ==========================================
+import { promises as fsPromises } from 'fs';
 
-**Core Concepts:**
-* **Origin Headers:** The browser sends origin headers to the server, and the server decides whether to authorize the origin.
-* **Allow Headers:** Server configuration explicitly permitting source domains, authorized HTTP methods, and custom headers.
-* **Pre-flight Requests:** Browsers send OPTIONS requests to check CORS configurations before executing write operations (POST, PUT, DELETE).
-
-```javascript
-import express from 'express';
-const app = express();
-
-// Custom CORS middleware configuration
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000'); // Authorize frontend origin
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200); // Handle pre-flight checks
+// FIX 1: Use non-blocking async file system API
+// FIX 2: Implement try-catch structure and delegate to centralized handler via next()
+app.get('/data-optimized', async (req, res, next) => {
+  try {
+    const data = await fsPromises.readFile('./bigfile.json', 'utf8'); // Non-blocking
+    res.send(data);
+  } catch (error) {
+    next(error); // Safe delegation
   }
-  next();
 });
 ```

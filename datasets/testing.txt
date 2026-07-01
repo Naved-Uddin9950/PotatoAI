@@ -1,129 +1,110 @@
-# What is Jest and Testing Types
+# Testing [BASIC WORKFLOW]: Simple Jest Assertions and RTL Component Rendering
 
-Software testing ensures application code correctness. Testing is divided into unit tests (verifying isolated elements), integration tests (verifying components interaction), and End-to-End tests (simulating full user flows).
+Software testing validates application behaviors. Jest serves as a test runner providing assertions, while **React Testing Library (RTL)** renders components and inspects virtual DOM schemas.
 
-**Core Concepts:**
-* **Unit Testing:** Focuses on testing single functions, components, or modules in isolation.
-* **Integration Testing:** Checks that multiple modules, database models, or external services function correctly together.
-* **Test Runner:** Jest is a comprehensive JavaScript test runner providing testing environments, assertions, mocking tools, and code coverage metrics.
-
-```javascript
-// Simple Jest Unit Test
-const sum = (a, b) => a + b;
-
-test('adds 1 + 2 to equal 3', () => {
-  expect(sum(1, 2)).toBe(3);
-});
-```
-@@@
-# React Testing Library Philosophy and DOM Queries
-
-React Testing Library (RTL) is the modern standard for validating React components. It encourages testing component behavior similar to real user interactions rather than testing raw implementation configurations.
-
-**Core Concepts:**
-* **User-Centric Philosophy:** Tests query rendered DOM tree elements rather than asserting internal state variables.
-* **Accessible Selectors:** RTL queries elements by accessible properties like roles (`screen.getByRole`) or labels (`screen.getByLabelText`).
-* **Visual Stability:** Tests are less brittle because refactoring internal code doesn't break query assertions if the UI layout is unchanged.
+**Key Core Concepts:**
+* **Test Suites:** Grouping assertions inside `test()` or `describe()` blocks.
+* **Jest Matchers:** Built-in expectations like `expect().toBe()` or `expect().toEqual()`.
+* **RTL Render:** Renders components inside virtual DOM boundaries.
+* **Accessible Queries:** Fetching elements by user-centric ARIA roles (`screen.getByRole`).
 
 ```javascript
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 
-function SimpleButton({ label }) {
-  return <button className="btn-primary">{label}</button>;
+// Simple greeting component
+function InfoBanner({ message }) {
+  return <div role="alert" className="banner">{message}</div>;
 }
 
-// RTL verification test
-test('renders Button component with correct label', () => {
-  render(<SimpleButton label="Click Me" />);
-  const buttonElement = screen.getByRole('button', { name: /click me/i });
-  expect(buttonElement).toBeInTheDocument();
+// Basic unit test
+test('renders alert banner containing message', () => {
+  render(<InfoBanner message="System status OK" />);
+  const alertEl = screen.getByRole('alert');
+  expect(alertEl).toBeInTheDocument();
+  expect(alertEl).toHaveTextContent('System status OK');
 });
 ```
 @@@
-# Mocking External Services and API Requests
+# Testing [EXPERT ARCHITECTURE]: Mock Service Worker (MSW) Network Mocking
 
-Live dependencies (APIs, files, external modules) are replaced with mock configurations during testing. Mocking keeps test executions fast, offline, and deterministic.
+In expert integration testing, mocking modules or libraries (like mocking `axios` globally) leads to brittle tests that hide implementation bugs. Best-practice setups utilize **Mock Service Worker (MSW)** to intercept network requests at the browser layer, keeping components isolated while maintaining realistic request pipelines.
 
-**Core Concepts:**
-* **Jest Spy Spies:** Tracking function execution, checking call counts, and inspecting passed arguments.
-* **Module Mocking:** Replacing complete external libraries (like `axios` or database drivers) with custom mocked objects.
-* **Deterministic Runs:** Eliminates network dependence, allowing tests to run locally and test error conditions like request timeouts.
+**Key Core Concepts:**
+* **MSW Network Interception:** Running virtual service workers that capture network calls at the protocol layer.
+* **Decoupled Mocking:** Eliminating mock imports inside components; mock logic resides in separate test servers.
+* **Deterministic Responses:** Intercepting routes and returning mock headers, status codes, and JSON payloads.
 
 ```javascript
-import React from 'react';
+import { setupServer } from 'msw/node';
+import { rest } from 'msw';
+import { render, screen } from '@testing-library/react';
+
+// 1. Setup MSW server and declare endpoints mock handlers
+const server = setupServer(
+  rest.get('https://api.potato.com/status', (req, res, ctx) => {
+    return res(ctx.status(200), ctx.json({ online: true }));
+  })
+);
+
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+// Component fetching data
+function StatusDisplay() {
+  const [status, setStatus] = React.useState('loading');
+  React.useEffect(() => {
+    fetch('https://api.potato.com/status')
+      .then(res => res.json())
+      .then(data => setStatus(data.online ? 'Online' : 'Offline'));
+  }, []);
+  return <div>Status: {status}</div>;
+}
+
+test('displays online status fetched from endpoint', async () => {
+  render(<StatusDisplay />);
+  const display = await screen.findByText(/Status: Online/i);
+  expect(display).toBeInTheDocument();
+});
+```
+@@@
+# Testing [OPTIMIZATION & ANTI-PATTERNS]: Resolving Act Warnings and DOM Query RAM Leaks
+
+Test runners on low-spec PCs easily encounter test delays, memory leaks, and false-positives due to incorrect async handling, resulting in the famous React *"not wrapped in act(...)"* warning.
+
+**Key Core Concepts:**
+* **Act Warning:** Occurs when components update state asynchronously *after* the test function completes.
+* **findBy Query Fallback:** Always use async `findBy` methods to await layout changes instead of hardcoded timers.
+* **DOM Pollution:** Always cleanup testing containers or mock intervals to prevent test runner memory leakage.
+
+```javascript
+// ==========================================
+// 🛑 BUGGY/UNOPTIMIZED CODE
+// ==========================================
 import { render, screen, fireEvent } from '@testing-library/react';
 
-function ActionButton({ onClick }) {
-  return <button onClick={onClick}>Submit Action</button>;
-}
-
-test('calls onClick callback when clicked', () => {
-  const mockCallback = jest.fn(); // Create mock function
-  render(<ActionButton onClick={mockCallback} />);
+test('submits form async', () => {
+  render(<MyForm />);
   
-  const button = screen.getByText(/submit action/i);
-  fireEvent.click(button);
+  fireEvent.click(screen.getByText('Submit'));
   
-  expect(mockCallback).toHaveBeenCalledTimes(1); // Assert call count
+  // BUG 1: Synchronous lookup fails because API response is async.
+  // BUG 2: Throws "not wrapped in act(...)" warning because state changes after test ends.
+  expect(screen.getByText('Success')).toBeInTheDocument(); 
 });
-```
-@@@
-# Custom DOM Assertions and Expectations
 
-Assertions form the core validation checks in test scripts, verifying application outputs against expected criteria. RTL extends Jest's default assertions with custom matchers.
-
-**Core Concepts:**
-* **Expect Matchers:** Default Jest expectations like `toBe()`, `toEqual()`, `toBeNull()`, and `toBeUndefined()`.
-* **RTL DOM Matchers:** Custom Jest matchers like `toBeInTheDocument()`, `toBeVisible()`, `toBeDisabled()`, and `toHaveClass()`.
-* **State Verification:** Ensures user interactions transition component layouts correctly (e.g. clicking "Open menu" displays dynamic divs).
-
-```javascript
-import React, { useState } from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
-
-function ToggleMessage() {
-  const [show, setShow] = useState(false);
-  return (
-    <div>
-      <button onClick={() => setShow(!show)}>Toggle</button>
-      {show && <p data-testid="msg">Secret Message</p>}
-    </div>
-  );
-}
-
-test('shows secret message on toggle click', () => {
-  render(<ToggleMessage />);
+// ==========================================
+// 🚀 HIGH-PERFORMANCE SOLUTION
+// ==========================================
+test('submits form async optimized', async () => {
+  render(<MyForm />);
   
-  // Verify element is not present initially
-  expect(screen.queryByTestId('msg')).toBeNull();
+  fireEvent.click(screen.getByText('Submit'));
   
-  fireEvent.click(screen.getByText(/toggle/i));
-  
-  // Assert element is now present and visible
-  expect(screen.getByTestId('msg')).toBeInTheDocument();
+  // FIX: Using await with async findByRole method implicitly waits for state updates,
+  // wrapping the asynchronous state render cycle in act() automatically.
+  const successMessage = await screen.findByText('Success');
+  expect(successMessage).toBeInTheDocument();
 });
-```
-@@@
-# Measuring Code Coverage
-
-Code coverage represents the percentage of code statements, branch logic, and functions executed during test runs. Coverage metrics help identify untested execution paths.
-
-**Core Concepts:**
-* **Statements Coverage:** Verifies if every line of code was executed during tests.
-* **Branches Coverage:** Verifies if every decision fork (e.g., both `if` and `else` blocks) was checked.
-* **CI Integration:** Setting baseline thresholds (e.g. 80% coverage) to block code merges that drop software quality standards.
-
-```javascript
-// Run Jest with code coverage tracking via terminal CLI:
-// npm test -- --coverage
-
-// Output metric representation:
-// --------------------|---------|----------|---------|---------|
-// File                | % Stmts | % Branch | % Funcs | % Lines |
-// --------------------|---------|----------|---------|---------|
-// All files           |   85.71 |       75 |   83.33 |   85.71 |
-//  button.js          |     100 |      100 |     100 |     100 |
-//  dataFetcher.js     |      75 |       50 |      75 |      75 |
-// --------------------|---------|----------|---------|---------|
 ```

@@ -1,147 +1,131 @@
-# What is .NET and the CLR Runtime
+# .NET [BASIC WORKFLOW]: Web API Controllers and Dependency Injection
 
-.NET is a free, cross-platform, open-source developer platform built by Microsoft for creating many different types of applications. It relies on the **Common Language Runtime (CLR)** to execute code.
+C# .NET utilizes a modular, controller-based pattern to build RESTful APIs. Dependency Injection (DI) is natively built into the .NET runtime to manage class lifecycles and decoupled constructors.
 
-**Core Concepts:**
-* **Common Language Runtime (CLR):** The execution engine that handles garbage collection, security, JIT compilation, and thread management.
-* **Just-In-Time (JIT) Compiler:** Compiles Intermediate Language (IL) byte-code into native machine instructions on the fly.
-* **Base Class Library (BCL):** A massive library of reusable classes, interfaces, and value types for standard tasks (I/O, threading, text, database access).
-* **Cross-Platform:** Runs natively on Windows, Linux, macOS, iOS, Android, and WebAssembly.
+**Key Core Concepts:**
+* **ControllerBase Class:** The foundation class providing HTTP-specific bindings and result helper methods.
+* **ApiController Attribute:** Configures route bindings, automatic HTTP 400 validation, and parameter extraction.
+* **Service Lifecycles:** 
+  * *Transient:* Created per instantiation request.
+  * *Scoped:* Created once per HTTP connection request.
+  * *Singleton:* Created once on startup and shared globally.
 
 ```javascript
-// A simple C# Console Application entry point
-using System;
+using Microsoft.AspNetCore.Mvc;
 
-namespace HelloWorld
+// Service contract registration example
+public interface IGreetService { string Greet(string name); }
+public class GreetService : IGreetService {
+    public string Greet(string name) => $"Hello, {name}!";
+}
+
+[ApiController]
+[Route("api/[controller]")]
+public class WelcomeController : ControllerBase
 {
-    class Program
+    private readonly IGreetService _greetService;
+
+    // Constructor injection of interface dependency
+    public WelcomeController(IGreetService greetService)
     {
-        static void Main(string[] args)
+        _greetService = greetService;
+    }
+
+    [HttpGet("{name}")]
+    public IActionResult WelcomeUser(string name)
+    {
+        return Ok(_greetService.Greet(name));
+    }
+}
+```
+@@@
+# .NET [EXPERT ARCHITECTURE]: Throttled Concurrent Processing with SemaphoreSlim and Task Parallelism
+
+Enterprise .NET architectures utilize the Task Parallel Library (TPL) to manage concurrent I/O workflows without blocking thread pools. When pulling batch resources, engineers use **SemaphoreSlim** to throttle execution, preventing resource starvation and database exhaustion.
+
+**Key Core Concepts:**
+* **Task.WhenAll:** Concurrently resolves multiple asynchronous Task threads.
+* **SemaphoreSlim Throttling:** Restricts active thread locks to a configured maximum limit.
+* **Thread-Pool Starvation:** Occurs when async threads block synchronously (e.g. using `.Result`), freezing the server under high load.
+* **CancellationToken:** Promulgates abort directives down the async execution chain.
+
+```javascript
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+
+public class ConcurrentScraper
+{
+    private readonly HttpClient _client = new HttpClient();
+    private readonly SemaphoreSlim _throttler = new SemaphoreSlim(5); // Throttle to max 5 concurrent downloads
+
+    public async Task<List<string>> BatchDownloadAsync(IEnumerable<string> urls, CancellationToken token)
+    {
+        var tasks = new List<Task<string>>();
+        foreach (var url in urls)
         {
-            Console.WriteLine("Hello from .NET Core!");
+            tasks.Add(DownloadWithThrottleAsync(url, token));
+        }
+        return (await Task.WhenAll(tasks)).ToList();
+    }
+
+    private async Task<string> DownloadWithThrottleAsync(string url, CancellationToken token)
+    {
+        await _throttler.WaitAsync(token); // Request slot
+        try
+        {
+            var response = await _client.GetAsync(url, token);
+            return await response.Content.ReadAsStringAsync(token);
+        }
+        finally
+        {
+            _throttler.Release(); // Free slot
         }
     }
 }
 ```
 @@@
-# Building APIs with ASP.NET Core Controllers
+# .NET [OPTIMIZATION & ANTI-PATTERNS]: Entity Framework N+1 Queries and Tracked Query Overhead
 
-ASP.NET Core provides a robust model-view-controller (MVC) pattern for building RESTful Web APIs, allowing endpoints to bind securely to C# classes and methods.
+Entity Framework Core (EF Core) abstractions can easily generate slow database calls, leading to N+1 query loops, massive CPU consumption on database instances, and RAM leaks from active tracker contexts.
 
-**Core Concepts:**
-* **ApiController Attribute:** Configures a class to serve HTTP API requests, enabling automatic model validation and HTTP response binding.
-* **Routing Engine:** Maps incoming request URLs to controller methods using route templates.
-* **HTTP Action Verbs:** Standard HTTP verb bindings (`[HttpGet]`, `[HttpPost]`, `[HttpPut]`, `[HttpDelete]`) mapping endpoints to methods.
-
-```javascript
-using Microsoft.AspNetCore.Mvc;
-using System.Collections.Generic;
-
-[ApiController]
-[Route("api/[controller]")]
-public class UsersController : ControllerBase
-{
-    // GET api/users
-    [HttpGet]
-    public ActionResult<IEnumerable<string>> GetUsers()
-    {
-        return Ok(new string[] { "Alice", "Bob", "Charlie" });
-    }
-}
-```
-@@@
-# Database Access with Entity Framework Core
-
-Entity Framework Core (EF Core) is a lightweight, cross-platform Object-Relational Mapper (ORM) that enables .NET developers to interact with relational databases using C# objects.
-
-**Core Concepts:**
-* **DbContext:** The primary class that coordinates EF Core functionality, representing a session with the database.
-* **DbSet:** Represents an in-memory collection of entity objects that maps directly to a database table.
-* **LINQ (Language Integrated Query):** Syntactic queries integrated into C# used to retrieve and filter data from the DB Context.
-* **Migrations:** Auto-generated schema changes tracking entity changes and applying incremental SQL script updates.
+**Key Core Concepts:**
+* **N+1 Query Loop:** Iterating lists and querying relation records inside loop scopes, making N database requests instead of 1.
+* **AsNoTracking:** Disables entity tracking cache for read-only queries, reducing RAM consumption.
+* **Eager Loading:** Pulling related entities in a single database request using the `.Include()` method.
 
 ```javascript
-using Microsoft.EntityFrameworkCore;
-using System.Linq;
-
-// Database Context Setup
-public class AppDbContext : DbContext
+// ==========================================
+// 🛑 BUGGY/UNOPTIMIZED CODE
+// ==========================================
+using (var context = new AppDbContext())
 {
-    public DbSet<User> Users { get; set; }
-}
-
-public class User
-{
-    public int Id { get; set; }
-    public string Name { get; set; }
-}
-
-// Querying database using LINQ
-public class UserService
-{
-    private readonly AppDbContext _context;
-
-    public UserService(AppDbContext context)
+    // BUG 1: Entity tracking is enabled by default for read-only query (spastes RAM cache)
+    // BUG 2: N+1 Database calls: Accessing Order entity inside foreach triggers individual SQL queries
+    var users = context.Users.ToList(); 
+    foreach (var user in users)
     {
-        _context = context;
-    }
-
-    public User GetActiveUser(int id)
-    {
-        return _context.Users.FirstOrDefault(u => u.Id == id);
+        Console.log(user.Orders.Count); // Triggers individual query per user loop
     }
 }
-```
-@@@
-# Dependency Injection in .NET Core
 
-Dependency Injection (DI) is built directly into .NET Core. It provides a native container to manage object lifecycles, reducing class coupling and increasing testability.
-
-**Core Concepts:**
-* **Service Registration:** Registering services in the application startup configuration.
-* **Lifecycles:** 
-  * *Transient:* Created every time they are requested.
-  * *Scoped:* Created once per client request (connection).
-  * *Singleton:* Created once on startup and shared globally.
-* **Constructor Injection:** Automatically resolving and injecting dependencies into controller or service constructors.
-
-```javascript
-using Microsoft.Extensions.DependencyInjection;
-
-// Startup configuration (Program.cs)
-var builder = WebApplication.CreateBuilder(args);
-
-// Registering dependencies with Scoped and Singleton lifecycles
-builder.Services.AddScoped<IUserRepository, UserRepository>();
-builder.Services.AddSingleton<IEmailService, EmailService>();
-
-var app = builder.Build();
-```
-@@@
-# Asynchronous Programming with Async/Await
-
-Asynchronous programming in C# utilizes the `async` and `await` keywords to prevent blocking application threads during heavy I/O operations (like database or network calls).
-
-**Core Concepts:**
-* **Task-based Asynchronous Pattern (TAP):** Methods returning a `Task` or `Task<T>` representing operations that will complete in the future.
-* **Await Keyword:** Suspends thread execution without blocking the CPU, yielding control back to the runtime thread pool until the task completes.
-* **Non-blocking Threads:** Prevents UI freezes in desktop apps and increases thread throughput on high-traffic web servers.
-
-```javascript
-using System.Net.Http;
-using System.Threading.Tasks;
-
-public class ApiClient
+// ==========================================
+// 🚀 HIGH-PERFORMANCE SOLUTION
+// ==========================================
+using (var context = new AppDbContext())
 {
-    private static readonly HttpClient _client = new HttpClient();
-
-    // Asynchronously fetches data from a remote endpoint
-    public async Task<string> FetchJsonDataAsync(string url)
-    {
-        HttpResponseMessage response = await _client.GetAsync(url);
-        response.EnsureSuccessStatusCode();
-        string data = await response.Content.ReadAsStringAsync();
-        return data;
-    }
+    // FIX 1: AsNoTracking() disables object tracking, reducing memory consumption
+    // FIX 2: Eager loading using Include() joins data in a single SQL query
+    // FIX 3: Projecting directly to explicit DTOs using Select() pulls only required fields
+    var optimizedUsers = context.Users
+        .AsNoTracking()
+        .Include(u => u.Orders)
+        .Select(u => new {
+            Username = u.Name,
+            OrderCount = u.Orders.Count
+        })
+        .ToList(); // Executed in 1 single database call
 }
 ```
