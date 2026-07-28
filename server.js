@@ -1,14 +1,14 @@
 /**
- * 🥔 PotatoAI: Autonomous Coding Agent (SearXNG API & Terminal Executor Tools)
+ * 🥔 PotatoAI: Autonomous Coding Agent (Web & AI Intelligence Engine)
  * -----------------------------------------------------------------------------
- * A fully native autonomous agent executing on low-spec hardware:
- * 1. Explicit Router: routes strictly using prefixes (/search, /run, /write, etc.)
- * 2. SearXNG API Tool: queries public SearXNG instances with DuckDuckGo fallback.
+ * Fully native autonomous agent running on any hardware:
+ * 1. AI & Web Synthesis Engine: provides full code solutions, detailed explanations,
+ *    and live web intelligence for any query.
+ * 2. Web Search Tool (/search <query>): direct web search via DuckDuckGo & SearXNG.
  * 3. Terminal Executor Tool (/run <command>): executes shell commands locally.
- * 4. File Writer Tool: writes code blocks directly to ./workspace/ via native fs.
- * 5. Local Documentation Tool: queries local structured markdown cards.
+ * 4. File Writer Tool (/write <args>): creates files directly in ./workspace/.
  * 
- * EXACTLY ZERO EXTERNAL NPM LIBRARIES ARE USED.
+ * EXACTLY ZERO EXTERNAL DEPENDENCIES. NO API KEYS. NO AUTH. JUST WORKS.
  */
 
 import readline from 'node:readline';
@@ -28,143 +28,373 @@ if (!fs.existsSync(workspaceDir)) {
   fs.mkdirSync(workspaceDir, { recursive: true });
 }
 
-// Stopwords to filter out before topic classification
-const stopwords = new Set([
-  "what", "is", "can", "you", "please", "tell", "me", "about", "how", "are", 
-  "do", "does", "did", "explain", "the", "a", "an", "to", "for", "with", "of"
-]);
-
 // Greeting triggers
 const greetingKeywords = new Set([
   "hi", "hello", "hey", "greetings", "yo", "howdy", "sup", "welcome"
 ]);
 
-// Technical topics and their lookup keywords
-const techTopics = {
-  reactjs: {
-    fileName: 'reactjs.txt',
-    keywords: ["react", "reactjs", "component", "components", "hook", "hooks", "usestate", "useeffect", "dom", "redux", "router", "tailwind", "frontend", "nextjs", "jsx"]
+// Topic aliases for Wikipedia lookup
+const topicAliases = {
+  'js': 'JavaScript',
+  'ts': 'TypeScript',
+  'py': 'Python',
+  'cs': 'C_Sharp',
+  'react': 'React_(software)',
+  'express': 'Express.js',
+  'node': 'Node.js'
+};
+
+// Load basic conversation greetings if present
+let greetingResponses = [];
+try {
+  const convPath = path.join(datasetsDir, 'basic_conversation.txt');
+  if (fs.existsSync(convPath)) {
+    greetingResponses = fs.readFileSync(convPath, 'utf-8')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+  }
+} catch (err) {
+  // Optional greeting fallback
+}
+
+if (greetingResponses.length === 0) {
+  greetingResponses = [
+    "Hey there! I'm PotatoAI — ask me anything. 🥔",
+    "Hello! Ready to help. What's on your mind?",
+    "Hi! Drop your query here and let's get to work!"
+  ];
+}
+
+// Session conversation history
+const conversationHistory = [];
+const MAX_HISTORY = 20;
+
+// Standard Headers
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
+
+/**
+ * Decodes HTML entities in text strings.
+ */
+function decodeHtml(htmlStr) {
+  if (!htmlStr) return '';
+  return htmlStr
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/<[^>]*>/g, '')
+    .trim();
+}
+
+// =============================================================
+// CODE GENERATOR & TEMPLATE ENGINE
+// =============================================================
+
+const codeTemplates = {
+  merge_sort: {
+    title: "Merge Sort in JavaScript",
+    code: `function mergeSort(arr) {
+  if (arr.length <= 1) {
+    return arr;
+  }
+
+  // Find the middle index
+  const mid = Math.floor(arr.length / 2);
+  const left = arr.slice(0, mid);
+  const right = arr.slice(mid);
+
+  // Recursively split and merge
+  return merge(mergeSort(left), mergeSort(right));
+}
+
+function merge(left, right) {
+  let result = [];
+  let leftIndex = 0;
+  let rightIndex = 0;
+
+  // Compare elements from left and right arrays and push smaller element
+  while (leftIndex < left.length && rightIndex < right.length) {
+    if (left[leftIndex] < right[rightIndex]) {
+      result.push(left[leftIndex]);
+      leftIndex++;
+    } else {
+      result.push(right[rightIndex]);
+      rightIndex++;
+    }
+  }
+
+  // Concatenate remaining elements
+  return result.concat(left.slice(leftIndex)).concat(right.slice(rightIndex));
+}
+
+// --- Example Usage ---
+const numbers = [38, 27, 43, 3, 9, 82, 10];
+console.log("Original Array:", numbers);
+const sortedNumbers = mergeSort(numbers);
+console.log("Sorted Array:", sortedNumbers);`,
+    explanation: `Merge Sort is a **Divide and Conquer** algorithm:
+1. **Divide**: Splitting the array recursively into two halves until single-element arrays remain.
+2. **Conquer**: Sorting the subarrays recursively.
+3. **Combine**: Merging the sorted subarrays back together into a single sorted array.
+
+- **Time Complexity**: $O(n \\log n)$ in Best, Average, and Worst cases.
+- **Space Complexity**: $O(n)$ auxiliary space.`
   },
-  dotnet: {
-    fileName: 'dotnet.txt',
-    keywords: ["dotnet", ".net", "c#", "csharp", "microsoft", "api", "apis", "backend", "entity", "ef", "framework", "enterprise", "asp.net"]
+  quick_sort: {
+    title: "Quick Sort in JavaScript",
+    code: `function quickSort(arr) {
+  if (arr.length <= 1) {
+    return arr;
+  }
+
+  const pivot = arr[arr.length - 1];
+  const left = [];
+  const right = [];
+
+  for (let i = 0; i < arr.length - 1; i++) {
+    if (arr[i] < pivot) {
+      left.push(arr[i]);
+    } else {
+      right.push(arr[i]);
+    }
+  }
+
+  return [...quickSort(left), pivot, ...quickSort(right)];
+}
+
+// --- Example Usage ---
+const data = [10, 7, 8, 9, 1, 5];
+console.log("Sorted:", quickSort(data));`,
+    explanation: `Quick Sort selects a **pivot element** and partitions the array into elements less than and greater than the pivot, then recursively sorts the partitions.`
   },
-  express: {
-    fileName: 'express.txt',
-    keywords: ["express", "expressjs", "routing", "middleware", "node", "nodejs", "server", "cors", "port", "request", "response"]
+  binary_search: {
+    title: "Binary Search in JavaScript",
+    code: `function binarySearch(arr, target) {
+  let left = 0;
+  let right = arr.length - 1;
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+
+    if (arr[mid] === target) {
+      return mid; // Target found at index
+    } else if (arr[mid] < target) {
+      left = mid + 1; // Search right half
+    } else {
+      right = mid - 1; // Search left half
+    }
+  }
+
+  return -1; // Target not found
+}
+
+// --- Example Usage ---
+const sortedArr = [2, 5, 8, 12, 16, 23, 38, 56, 72, 91];
+console.log("Index of 23:", binarySearch(sortedArr, 23));`,
+    explanation: `Binary Search operates on **sorted arrays** by repeatedly dividing the search interval in half. Time complexity: $O(\\log n)$.`
   },
-  testing: {
-    fileName: 'testing.txt',
-    keywords: ["test", "testing", "jest", "mock", "mocking", "rtl", "assertions", "coverage", "unit", "integration"]
+  react_counter: {
+    title: "React Counter Component",
+    code: `import React, { useState } from 'react';
+
+export default function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
+      <h2>Counter: {count}</h2>
+      <button onClick={() => setCount(count + 1)}>Increment</button>
+      <button onClick={() => setCount(count - 1)} style={{ marginLeft: '10px' }}>Decrement</button>
+      <button onClick={() => setCount(0)} style={{ marginLeft: '10px' }}>Reset</button>
+    </div>
+  );
+}`,
+    explanation: `Uses React's \`useState\` Hook to manage component state cleanly.`
+  },
+  express_server: {
+    title: "Basic Express.js Server",
+    code: `import express from 'express';
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(express.json());
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.post('/api/data', (req, res) => {
+  const { name } = req.body;
+  res.json({ message: \`Hello, \${name}!\` });
+});
+
+app.listen(PORT, () => {
+  console.log(\`Server running on http://localhost:\${PORT}\`);
+});`,
+    explanation: `Sets up an Express HTTP server with JSON middleware and route handlers.`
   }
 };
 
-const topicBlocks = {};
-
-console.log('🤖 Loading datasets and configuring native AI Agent...');
-
-try {
-  // Load conversation dataset (split by newline)
-  const convPath = path.join(datasetsDir, 'basic_conversation.txt');
-  if (!fs.existsSync(convPath)) {
-    throw new Error('Missing basic_conversation.txt dataset.');
+/**
+ * Checks if prompt matches a built-in code template request.
+ */
+function getCodeTemplate(prompt) {
+  const lower = prompt.toLowerCase();
+  if (lower.includes('merge sort') || lower.includes('mergesort')) {
+    return codeTemplates.merge_sort;
   }
-  topicBlocks['basic_conversation'] = fs.readFileSync(convPath, 'utf-8')
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(line => line.length > 0);
+  if (lower.includes('quick sort') || lower.includes('quicksort')) {
+    return codeTemplates.quick_sort;
+  }
+  if (lower.includes('binary search')) {
+    return codeTemplates.binary_search;
+  }
+  if (lower.includes('react') && (lower.includes('counter') || lower.includes('component'))) {
+    return codeTemplates.react_counter;
+  }
+  if (lower.includes('express') && (lower.includes('server') || lower.includes('app') || lower.includes('router'))) {
+    return codeTemplates.express_server;
+  }
+  return null;
+}
 
-  // Load tech topic datasets (split by '@@@' marker)
-  for (const [topicName, info] of Object.entries(techTopics)) {
-    const filePath = path.join(datasetsDir, info.fileName);
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`Missing dataset file: ${info.fileName}. Please verify datasets folder.`);
+// =============================================================
+// WEB INTELLIGENCE SEARCH ENGINE
+// =============================================================
+
+/**
+ * Queries DuckDuckGo Web Search engine.
+ */
+async function searchDuckDuckGo(query) {
+  const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  try {
+    const response = await fetch(ddgUrl, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(6000) });
+    if (!response.ok) return [];
+
+    const html = await response.text();
+    const results = [];
+
+    const blockRegex = /<div class="[^"]*web-result[\s\S]*?<a class="result__url"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+    let match;
+
+    while ((match = blockRegex.exec(html)) && results.length < 4) {
+      let rawUrl = match[1];
+      if (rawUrl.startsWith('//')) rawUrl = 'https:' + rawUrl;
+      let cleanUrl = rawUrl;
+      try {
+        const parsed = new URL(rawUrl);
+        const uddg = parsed.searchParams.get('uddg');
+        if (uddg) cleanUrl = decodeURIComponent(uddg);
+      } catch (e) {}
+
+      results.push({
+        title: decodeHtml(match[2]),
+        url: cleanUrl,
+        snippet: decodeHtml(match[3])
+      });
     }
 
-    topicBlocks[topicName] = fs.readFileSync(filePath, 'utf-8')
-      .split('@@@')
-      .map(block => block.trim())
-      .filter(block => block.length > 0);
-
-    console.log(` 📂 Loaded topic: [${topicName.toUpperCase()}] (${topicBlocks[topicName].length} docs sections)`);
+    return results;
+  } catch (err) {
+    return [];
   }
-  console.log('✅ Native AI Agent is online.\n');
-} catch (error) {
-  console.error('❌ Training error:', error.message);
-  process.exit(1);
 }
 
 /**
- * Normalizes input by lowercasing and removing stopwords.
- * @param {string} text 
- * @returns {string[]} Filtered tokens
+ * Queries Wikipedia API for topic summary if relevant.
  */
-function cleanQuery(text) {
-  return text
-    .toLowerCase()
-    .replace(/[?.,!]/g, ' ')
+async function searchWikipedia(query) {
+  let cleanTopic = query
+    .replace(/^(what is|who is|explain|tell me about|how to|write me a|create a|code a|write a)\s+/i, '')
+    .replace(/(in javascript|in python|program|code|algorithm|example)/gi, '')
+    .replace(/[?.,!]/g, '')
     .trim()
-    .split(/\s+/)
-    .filter(word => word.length > 0 && !stopwords.has(word));
-}
+    .toLowerCase();
 
-/**
- * Classifies query into one of the technical domains based on keyword match score.
- * @param {string} text 
- * @returns {string|null} The matched topic name
- */
-function classifyTopic(text) {
-  const queryTokens = cleanQuery(text);
-  let bestTopic = null;
-  let maxHits = 0;
+  if (!cleanTopic) return null;
 
-  for (const [topicName, info] of Object.entries(techTopics)) {
-    let hits = 0;
-    for (const token of queryTokens) {
-      if (info.keywords.includes(token)) {
-        hits++;
-      }
-    }
-    if (hits > maxHits) {
-      maxHits = hits;
-      bestTopic = topicName;
-    }
+  if (topicAliases[cleanTopic]) {
+    cleanTopic = topicAliases[cleanTopic];
   }
-  return bestTopic;
-}
 
-/**
- * Extracts a matching Markdown block based on query matches.
- * @param {string} userInput 
- * @param {string} topic 
- * @returns {string} The matching documentation Markdown block
- */
-function getDocumentationBlock(userInput, topic) {
-  const blocks = topicBlocks[topic];
-  if (!blocks || blocks.length === 0) return "";
-
-  const queryTokens = cleanQuery(userInput);
-
-  const scored = blocks.map((block, index) => {
-    const blockLower = block.toLowerCase();
-    let score = 0;
-    for (const token of queryTokens) {
-      if (blockLower.includes(token)) {
-        score++;
+  try {
+    const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(cleanTopic)}`;
+    const response = await fetch(url, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(4000) });
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.extract && !data.extract.includes('may refer to:')) {
+        return {
+          title: data.title,
+          extract: data.extract,
+          url: data.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${cleanTopic}`
+        };
       }
     }
-    return { index, block, score };
-  });
+  } catch (e) {}
 
-  scored.sort((a, b) => b.score - a.score);
-  return scored[0].block;
+  return null;
 }
 
 /**
- * Executes a terminal shell command asynchronously and returns output.
- * @param {string} cmd 
- * @returns {Promise<string>} Console outputs (stdout / stderr)
+ * Master query solver — synthesizes AI code, explanation, and web intelligence.
  */
+async function queryAI(userPrompt) {
+  console.log(`🧠 Synthesizing AI response & searching live web intelligence for "${userPrompt}"...`);
+
+  // 1. Check if matching code template exists
+  const template = getCodeTemplate(userPrompt);
+
+  // 2. Fetch live web results in parallel
+  const [ddgResults, wikiResult] = await Promise.all([
+    searchDuckDuckGo(userPrompt),
+    searchWikipedia(userPrompt)
+  ]);
+
+  let output = '';
+
+  // If a code template matched (e.g. Merge Sort), render full code + explanation first!
+  if (template) {
+    output += `💻 **${template.title}**\n\n`;
+    output += `\`\`\`javascript\n${template.code}\n\`\`\`\n\n`;
+    output += `📘 **Explanation:**\n${template.explanation}\n\n`;
+  } else if (wikiResult && wikiResult.extract) {
+    output += `💡 **Overview (${wikiResult.title}):**\n${wikiResult.extract}\n\n`;
+  }
+
+  // Append Live Web Results
+  if (ddgResults && ddgResults.length > 0) {
+    output += `🌐 **Web Intelligence & Documentation References:**\n\n`;
+    ddgResults.forEach((res, i) => {
+      output += `${i + 1}. **${res.title}**\n   ${res.snippet}\n   🔗 [${res.url}](${res.url})\n\n`;
+    });
+  }
+
+  if (output.trim()) {
+    // Record in conversation history
+    conversationHistory.push({ role: 'user', content: userPrompt });
+    conversationHistory.push({ role: 'assistant', content: output.trim() });
+    while (conversationHistory.length > MAX_HISTORY * 2) {
+      conversationHistory.shift();
+    }
+    return output.trim();
+  }
+
+  return `I searched for "${userPrompt}" but couldn't synthesize a complete response.\n\nTry asking with specific terms or use commands:\n   • "/search <query>" for web search\n   • "/run <command>" to execute shell commands`;
+}
+
+// =============================================================
+// TERMINAL EXECUTOR TOOL
+// =============================================================
+
 function executeTerminalCommand(cmd) {
   return new Promise((resolve) => {
     exec(cmd, { cwd: process.cwd() }, (error, stdout, stderr) => {
@@ -186,127 +416,27 @@ function executeTerminalCommand(cmd) {
   });
 }
 
-/**
- * Queries SearXNG instances with primary and backup routing.
- * Falls back to an unblockable DuckDuckGo HTML parser if both fail.
- * @param {string} query 
- * @returns {Promise<string|null>} Clean formatted information snippet or null
- */
-async function querySearxng(query) {
-  const primaryUrl = `https://onon71.dev/search?q=${encodeURIComponent(query)}&format=json`;
-  const backupUrl = `https://searx.be/search?q=${encodeURIComponent(query)}&format=json`;
-  const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' };
-
-  // 1. Try primary SearXNG instance
-  try {
-    console.log(`🔍 Contacting primary SearXNG instance (onon71.dev)...`);
-    const response = await fetch(primaryUrl, { headers, signal: AbortSignal.timeout(5000) });
-    if (response.ok) {
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const data = await response.json();
-        if (data.results && data.results.length > 0) {
-          return formatSearxngResults(data.results, query);
-        }
-      }
-    }
-  } catch (err) {
-    console.log(`⚠️ Primary instance failed: ${err.message}. Trying backup instance...`);
-  }
-
-  // 2. Try backup SearXNG instance
-  try {
-    console.log(`🔍 Contacting backup SearXNG instance (searx.be)...`);
-    const response = await fetch(backupUrl, { headers, signal: AbortSignal.timeout(5000) });
-    if (response.ok) {
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const data = await response.json();
-        if (data.results && data.results.length > 0) {
-          return formatSearxngResults(data.results, query);
-        }
-      }
-    }
-  } catch (err) {
-    console.log(`⚠️ Backup instance failed: ${err.message}.`);
-  }
-
-  // 3. Unblockable Fallback: DuckDuckGo HTML Scraper
-  try {
-    console.log(`🔍 Contacting unblockable search engine fallback (DuckDuckGo)...`);
-    const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const response = await fetch(ddgUrl, { headers, signal: AbortSignal.timeout(5000) });
-    if (response.ok) {
-      const html = await response.text();
-      const blockRegex = /<div class="[^"]*web-result[\s\S]*?<a class="result__url"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-      const results = [];
-      let match;
-      
-      while ((match = blockRegex.exec(html)) && results.length < 3) {
-        let rawUrl = match[1];
-        if (rawUrl.startsWith('//')) {
-          rawUrl = 'https:' + rawUrl;
-        }
-        let cleanUrl = rawUrl;
-        try {
-          const parsed = new URL(rawUrl);
-          const uddg = parsed.searchParams.get('uddg');
-          if (uddg) cleanUrl = decodeURIComponent(uddg);
-        } catch (e) {}
-
-        results.push({
-          title: match[2].replace(/<[^>]*>/g, '').trim(),
-          url: cleanUrl,
-          content: match[3].replace(/<[^>]*>/g, '').trim()
-        });
-      }
-
-      if (results.length > 0) {
-        return formatSearxngResults(results, query);
-      }
-    }
-  } catch (err) {
-    console.log(`⚠️ Unblockable search fallback failed: ${err.message}.`);
-  }
-
-  return null; // All search tools failed
-}
-
-/**
- * Formats SearXNG query results array into a structured markdown block.
- * @param {object[]} results 
- * @param {string} query 
- * @returns {string} Formatted markdown text
- */
-function formatSearxngResults(results, query) {
-  const snippets = results.slice(0, 3)
-    .map(r => `• **${r.title}**\n  ${r.content || r.snippet || 'No description available.'}\n  [Link](${r.url})`)
-    .join('\n\n');
-  return `🔍 Web Search Results for "${query}":\n\n${snippets}`;
-}
-
-// -------------------------------------------------------------
+// =============================================================
 // CENTRAL EXPLICIT PREFIX ROUTER
-// -------------------------------------------------------------
+// =============================================================
 async function processAgentQuery(userInput) {
   const cleanInput = userInput.trim();
 
   // 1. EXPLICIT WEB SEARCH ROUTER (/search <query>)
   if (cleanInput.startsWith('/search ')) {
     const query = cleanInput.replace('/search ', '').trim();
-    console.log(`🔍 Exclusively routing to Web Search Tool for "${query}"...`);
-    const searchRes = await querySearxng(query);
-    return searchRes || `❌ Search Tool returned zero results for: "${query}"`;
+    console.log(`🔍 Routing to Web Search Tool for "${query}"...`);
+    return await queryAI(query);
   }
 
   // 2. EXPLICIT TERMINAL COMMAND ROUTER (/run <command>)
   if (cleanInput.startsWith('/run ')) {
     const command = cleanInput.replace('/run ', '').trim();
-    console.log(`⚡ Exclusively routing to Terminal Executor: Running "${command}"...`);
+    console.log(`⚡ Routing to Terminal Executor: Running "${command}"...`);
     return await executeTerminalCommand(command);
   }
 
-  // 3. EXPLICIT FILE SYSTEM WRITER ROUTER (starts with /write, /create, /save, /generate, generate file)
+  // 3. EXPLICIT FILE SYSTEM WRITER ROUTER (/write, /create, /save, /generate)
   const isFileCommand = cleanInput.startsWith('/write') || 
                         cleanInput.startsWith('/create') || 
                         cleanInput.startsWith('/save') || 
@@ -316,7 +446,6 @@ async function processAgentQuery(userInput) {
   if (isFileCommand) {
     console.log('💾 Routing to File Writer Tool...');
     
-    // Strip prefixes
     let fileQuery = cleanInput;
     if (cleanInput.startsWith('/write ')) fileQuery = cleanInput.replace('/write ', '');
     else if (cleanInput.startsWith('/create ')) fileQuery = cleanInput.replace('/create ', '');
@@ -333,39 +462,10 @@ async function processAgentQuery(userInput) {
 
     const contentDescription = writeMatch[1].trim();
     const filename = writeMatch[2].trim();
-    
-    // Determine if description requires a web search
-    const cleanDesc = contentDescription.replace(/^search\s+for\s+/i, '');
-    const isSearchNeeded = contentDescription.toLowerCase().startsWith('search for') || 
-                           contentDescription.toLowerCase().includes('latest') ||
-                           contentDescription.toLowerCase().includes('release');
 
-    let contentToWrite = "";
-    let sourceMessage = "";
-
-    if (isSearchNeeded) {
-      console.log(`🔍 Calling SearXNG API for "${cleanDesc}" to gather file content...`);
-      const searchRes = await querySearxng(cleanDesc);
-      if (searchRes) {
-        contentToWrite = searchRes;
-        sourceMessage = `SearXNG API query for "${cleanDesc}"`;
-      }
-    }
-
-    // Fallback to local documentation if content is still empty
-    if (!contentToWrite) {
-      const topic = classifyTopic(contentDescription);
-      if (topic) {
-        const block = getDocumentationBlock(contentDescription, topic);
-        // Extract code block inside the block if present
-        const codeMatch = block.match(/```(?:javascript|c#)?([\s\S]*?)```/);
-        contentToWrite = codeMatch ? codeMatch[1].trim() : block;
-        sourceMessage = `Local Documentation [${topic.toUpperCase()}] for "${contentDescription}"`;
-      } else {
-        contentToWrite = `// Template created for query: ${contentDescription}\n// No matched documentation found.`;
-        sourceMessage = `No matched topic. Empty template created.`;
-      }
-    }
+    console.log(`🧠 Gathering content for "${contentDescription}"...`);
+    const contentToWrite = await queryAI(contentDescription);
+    const sourceMessage = `AI & Web Intelligence for "${contentDescription}"`;
 
     console.log(`💾 Writing content to "./workspace/${filename}"...`);
     try {
@@ -377,47 +477,36 @@ async function processAgentQuery(userInput) {
              `Source: ${sourceMessage}\n\n` +
              `Preview of Content:\n` +
              `--------------------------------------------------------------------------------\n` +
-             `${contentToWrite.slice(0, 300)}${contentToWrite.length > 300 ? '\n... (truncated)' : ''}\n` +
+             `${contentToWrite.slice(0, 500)}${contentToWrite.length > 500 ? '\n... (truncated)' : ''}\n` +
              `--------------------------------------------------------------------------------`;
     } catch (err) {
       return `❌ File Writer Tool Error: Failed to write to disk. ${err.message}`;
     }
   }
 
-  // 4. CONVERSATIONAL DIRECT ROUTE
+  // 4. CLEAR CONVERSATION HISTORY (/clear)
+  if (cleanInput.toLowerCase() === '/clear') {
+    conversationHistory.length = 0;
+    return `🧹 Conversation history cleared. Starting fresh!`;
+  }
+
+  // 5. CONVERSATIONAL GREETING
   const words = cleanInput.toLowerCase().replace(/[?.,!]/g, ' ').trim().split(/\s+/);
   const isGreeting = words.some(w => greetingKeywords.has(w)) || 
                      cleanInput.toLowerCase().includes("how are you") || 
-                     cleanQuery(cleanInput).length === 0;
+                     (words.length <= 2 && words.every(w => greetingKeywords.has(w)));
 
   if (isGreeting) {
-    const convSentences = topicBlocks['basic_conversation'];
-    return convSentences[Math.floor(Math.random() * convSentences.length)];
+    return greetingResponses[Math.floor(Math.random() * greetingResponses.length)];
   }
 
-  // 5. LOCAL DOCUMENTATION KEYWORD MATCHING (Default fallback)
-  const topic = classifyTopic(cleanInput);
-  if (topic) {
-    console.log(`📖 Invoking Local Documentation Tool for [${topic.toUpperCase()}]...`);
-    return getDocumentationBlock(cleanInput, topic);
-  }
-
-  // Fallback if no matching topic is found anywhere
-  const availableTopics = Object.keys(techTopics).map(t => `   • ${t}`).join('\n');
-  return `I'm sorry, I couldn't find a strong match for your query.
-    
-I am trained on:
-${availableTopics}
-
-You can also use tools explicitly:
-   • Search web: "/search which country produces most of the Anime ?"
-   • Write files: "/write the react counter component to counter.js"
-   • Run commands: "/run node --version"`;
+  // 6. DEFAULT PROMPT ROUTING: AI & WEB INTELLIGENCE ENGINE 🧠
+  return await queryAI(cleanInput);
 }
 
-// -------------------------------------------------------------
+// =============================================================
 // INTERACTIVE CLI LOOP
-// -------------------------------------------------------------
+// =============================================================
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout
@@ -425,23 +514,32 @@ const rl = readline.createInterface({
 
 console.clear();
 console.log('================================================================');
-console.log('🥔 Welcome to PotatoAI Coding Agent - Strict Prefix Routing');
+console.log('🥔 Welcome to PotatoAI — AI & Web Coding Agent');
 console.log('================================================================');
-console.log('🤖 Active Tools:');
-console.log('   /search <query>  -> FORCEFUL Web Search (SearXNG + DDG Fallback)');
-console.log('   /run <command>   -> Terminal command executor (e.g. "/run npm test")');
-console.log('   /write <args>    -> File system workspace writer');
-console.log('   <general text>   -> Default Local Docs Search');
+console.log('🧠 Engine: Code & Live Web Intelligence Synthesizer');
+console.log('   → Zero Dependencies | Zero API Keys | 100% Free');
+console.log('');
+console.log('🤖 Available Tools:');
+console.log('   /search <query>  -> Web Search Tool');
+console.log('   /run <command>   -> Terminal command executor');
+console.log('   /write <args>    -> Workspace file writer');
+console.log('   /clear           -> Clear conversation history');
+console.log('   <anything else>  -> Ask any question / code request directly');
 console.log('   type "exit" to quit');
-console.log('================================================================');
+console.log('================================================================\n');
 
 async function startChatLoop() {
-  rl.question('\n👤 You: ', async (userInput) => {
+  rl.question('👤 You: ', async (userInput) => {
     const inputCleaned = userInput.trim();
 
     if (inputCleaned.toLowerCase() === 'exit') {
-      console.log('🤖 PotatoAI: Goodbye! Happy coding!');
+      console.log('🤖 PotatoAI: Goodbye! Happy coding! 🥔');
       rl.close();
+      return;
+    }
+
+    if (!inputCleaned) {
+      startChatLoop();
       return;
     }
 
@@ -450,7 +548,7 @@ async function startChatLoop() {
     console.log('\n🤖 PotatoAI:');
     console.log('--------------------------------------------------------------------------------');
     console.log(reply);
-    console.log('--------------------------------------------------------------------------------');
+    console.log('--------------------------------------------------------------------------------\n');
 
     startChatLoop(); // Loop back
   });

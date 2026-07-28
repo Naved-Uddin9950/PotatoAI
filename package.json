@@ -11,8 +11,5 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "module",
-  "dependencies": {
-    "natural": "^8.1.1"
-  }
+  "type": "module"
 }
